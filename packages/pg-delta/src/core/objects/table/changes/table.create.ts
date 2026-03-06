@@ -84,6 +84,10 @@ export class CreateTable extends CreateTableChange {
           }
         }
       }
+
+      // Function dependencies from DEFAULT expressions are handled by pg_depend
+      // catalog constraints in the sort pipeline, which provides exact argument
+      // types and covers all expression contexts (not just column defaults).
     }
 
     return Array.from(dependencies);

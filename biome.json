@@ -22,7 +22,7 @@
     }
   },
   "files": {
-    "includes": ["**"]
+    "includes": ["**", "!packages/pg-delta/src/core/fixtures/empty-catalogs"]
   },
   "assist": {
     "enabled": true,

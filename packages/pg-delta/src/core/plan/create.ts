@@ -2,12 +2,14 @@
  * Plan creation - the main entry point for creating migration plans.
  */
 
-import { readFile } from "node:fs/promises";
 import type { Pool } from "pg";
 import { escapeIdentifier } from "pg";
 import { diffCatalogs } from "../catalog.diff.ts";
-import type { Catalog } from "../catalog.model.ts";
-import { extractCatalog } from "../catalog.model.ts";
+import {
+  Catalog,
+  createEmptyCatalog,
+  extractCatalog,
+} from "../catalog.model.ts";
 import type { Change } from "../change.types.ts";
 import type { DiffContext } from "../context.ts";
 import { buildPlanScopeFingerprint, hashStableIds } from "../fingerprint.ts";
@@ -20,8 +22,9 @@ import {
   compileSerializeDSL,
   type SerializeDSL,
 } from "../integrations/serialize/dsl.ts";
-import { createPool, endPool } from "../postgres-config.ts";
+import { createManagedPool, endPool } from "../postgres-config.ts";
 import { sortChanges } from "../sort/sort-changes.ts";
+import type { PgDependRow } from "../sort/types.ts";
 import { classifyChangesRisk } from "./risk.ts";
 import type { CreatePlanOptions, Plan } from "./types.ts";
 
@@ -30,254 +33,79 @@ import type { CreatePlanOptions, Plan } from "./types.ts";
 // ============================================================================
 
 /**
- * Create a migration plan by comparing two databases.
+ * Input for source/target: a postgres connection URL, an existing Pool, or
+ * an already-resolved Catalog (e.g. deserialized from a snapshot file).
+ */
+export type CatalogInput = string | Pool | Catalog;
+
+/**
+ * Create a migration plan by comparing two catalog states.
  *
- * @param fromUrl - Source database connection URL (current state)
- * @param toUrl - Target database connection URL (desired state)
+ * Each input can be:
+ * - A postgres connection URL (string) -- a pool is created and catalog extracted
+ * - An existing pg Pool -- catalog is extracted directly
+ * - A Catalog instance -- used as-is (e.g. from a deserialized snapshot)
+ *
+ * When `source` is `null`, a minimal empty catalog (`createEmptyCatalog`) is
+ * used as the baseline. For a more accurate baseline, pass a Catalog
+ * deserialized from a snapshot of `template1` or another reference database.
+ *
+ * @param source - Source catalog input (current state), or null for empty baseline
+ * @param target - Target catalog input (desired state)
  * @param options - Optional configuration
  * @returns A Plan if there are changes, null if databases are identical
  */
-type ConnectionInput = string | Pool;
-
-type SslConfig = {
-  ssl?:
-    | boolean
-    | {
-        rejectUnauthorized: boolean;
-        ca?: string;
-        cert?: string;
-        key?: string;
-        /**
-         * Custom server identity check function.
-         * Used to skip hostname verification for verify-ca mode.
-         * Returns undefined to indicate success (no error).
-         */
-        checkServerIdentity?: () => undefined;
-      };
-  cleanedUrl: string;
-};
-
-/**
- * Parse SSL configuration from a PostgreSQL connection URL.
- * Supports sslmode (require, verify-ca, verify-full, prefer, disable).
- * Certificates can be provided via:
- * - Query string parameters (file paths): sslrootcert, sslcert, sslkey (preferred)
- * - Environment variables (content): PGDELTA_SOURCE_SSLROOTCERT/SSLCERT/SSLKEY or PGDELTA_TARGET_SSLROOTCERT/SSLCERT/SSLKEY
- * Returns SSL options for the postgres.js library and a cleaned URL without SSL-related query parameters.
- */
-async function parseSslConfig(
-  url: string,
-  connectionType: "source" | "target",
-): Promise<SslConfig> {
-  const urlObj = new URL(url);
-  const sslmode = urlObj.searchParams.get("sslmode");
-  const sslrootcert = urlObj.searchParams.get("sslrootcert");
-  const sslcert = urlObj.searchParams.get("sslcert");
-  const sslkey = urlObj.searchParams.get("sslkey");
-
-  // Remove SSL-related query parameters since we parse them ourselves
-  urlObj.searchParams.delete("sslmode");
-  urlObj.searchParams.delete("sslrootcert");
-  urlObj.searchParams.delete("sslcert");
-  urlObj.searchParams.delete("sslkey");
-  const cleanedUrl = urlObj.toString();
-
-  // Handle different SSL modes
-  if (sslmode === "disable") {
-    return { cleanedUrl, ssl: false };
-  }
-
-  if (
-    sslmode === "require" ||
-    sslmode === "prefer" ||
-    sslmode === "verify-ca" ||
-    sslmode === "verify-full"
-  ) {
-    // Helper function to get certificate value: query param (file path) takes precedence over env var (content)
-    const getCertValue = async (
-      queryParam: string | null,
-      envVarName: string,
-    ): Promise<string | undefined> => {
-      // Prefer query parameter (file path)
-      if (queryParam) {
-        try {
-          return await readFile(queryParam, "utf-8");
-        } catch (error) {
-          throw new Error(
-            `Failed to read certificate file '${queryParam}': ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      }
-      // Fallback to environment variable (content)
-      const envValue = process.env[envVarName];
-      return envValue || undefined;
-    };
-
-    const hasExplicitVerification =
-      sslmode === "verify-ca" || sslmode === "verify-full";
-
-    // Get CA certificate value.
-    // - verify-ca/verify-full: check query param first, then env var
-    // - require/prefer: only check query param (libpq backward compatibility
-    //   requires an explicit root CA *file*, not a global env var)
-    const caEnvVar =
-      connectionType === "source"
-        ? "PGDELTA_SOURCE_SSLROOTCERT"
-        : "PGDELTA_TARGET_SSLROOTCERT";
-    let caValue: string | undefined;
-    if (sslrootcert) {
-      // Explicit file path in query param — always honour it
-      caValue = await getCertValue(sslrootcert, caEnvVar);
-    } else if (hasExplicitVerification) {
-      // verify-ca / verify-full without file path — fall back to env var
-      caValue = await getCertValue(null, caEnvVar);
-    }
-    // require/prefer without sslrootcert: no CA cert, no verification
-
-    // Determine if we should verify the CA chain
-    //   From PostgreSQL docs: "if a root CA file exists, the behavior of sslmode=require
-    //   will be the same as that of verify-ca"
-    const hasLibpqCompatibility =
-      (sslmode === "require" || sslmode === "prefer") && caValue !== undefined;
-    const shouldVerifyCa = hasExplicitVerification || hasLibpqCompatibility;
-
-    // Determine if we should verify hostname
-    // - verify-full: verify both CA and hostname
-    // - verify-ca: verify CA only (skip hostname)
-    // - require/prefer with CA (libpq compat): behaves like verify-ca (skip hostname)
-    const shouldVerifyHostname = sslmode === "verify-full";
-
-    const ssl: {
-      rejectUnauthorized: boolean;
-      ca?: string;
-      cert?: string;
-      key?: string;
-      checkServerIdentity?: () => undefined;
-    } = {
-      rejectUnauthorized: shouldVerifyCa,
-    };
-
-    // Add CA certificate if verifying
-    if (shouldVerifyCa && caValue) {
-      ssl.ca = caValue;
-    }
-
-    // For verify-ca and libpq compatibility mode: skip hostname verification
-    // This matches PostgreSQL semantics where verify-ca only checks the CA chain
-    if (shouldVerifyCa && !shouldVerifyHostname) {
-      ssl.checkServerIdentity = () => undefined;
-    }
-
-    // Get client certificate (optional, for mutual TLS)
-    const certEnvVar =
-      connectionType === "source"
-        ? "PGDELTA_SOURCE_SSLCERT"
-        : "PGDELTA_TARGET_SSLCERT";
-    const certValue = await getCertValue(sslcert, certEnvVar);
-    if (certValue) {
-      ssl.cert = certValue;
-    }
-
-    // Get client key (optional, for mutual TLS, required if cert is provided)
-    const keyEnvVar =
-      connectionType === "source"
-        ? "PGDELTA_SOURCE_SSLKEY"
-        : "PGDELTA_TARGET_SSLKEY";
-    const keyValue = await getCertValue(sslkey, keyEnvVar);
-    if (keyValue) {
-      ssl.key = keyValue;
-    }
-
-    // Warn if cert is provided without key (or vice versa)
-    if ((ssl.cert && !ssl.key) || (!ssl.cert && ssl.key)) {
-      throw new Error(
-        "Both client certificate and key must be provided together for mutual TLS",
-      );
-    }
-
-    return { ssl, cleanedUrl };
-  }
-
-  // No sslmode specified or invalid value - explicitly disable SSL
-  return { cleanedUrl, ssl: false };
-}
-
 export async function createPlan(
-  source: ConnectionInput,
-  target: ConnectionInput,
+  source: CatalogInput | null,
+  target: CatalogInput,
   options: CreatePlanOptions = {},
 ): Promise<{ plan: Plan; sortedChanges: Change[]; ctx: DiffContext } | null> {
-  let sourcePool: Pool;
-  let targetPool: Pool;
-  let shouldCloseSource = false;
-  let shouldCloseTarget = false;
-
-  // Suppress expected shutdown errors from idle pool connections (57P01 = admin_shutdown)
-  const onError = (err: Error & { code?: string }) => {
-    if (err.code !== "57P01") {
-      console.error("Pool error:", err);
+  const resolvePool = async (
+    input: string | Pool,
+    label: "source" | "target",
+  ): Promise<{ pool: Pool; shouldClose: boolean }> => {
+    if (typeof input === "string") {
+      const managed = await createManagedPool(input, {
+        role: options.role,
+        label,
+      });
+      return { pool: managed.pool, shouldClose: true };
     }
+    return { pool: input, shouldClose: false };
   };
 
-  if (typeof source === "string") {
-    const sslConfig = await parseSslConfig(source, "source");
-    sourcePool = createPool(sslConfig.cleanedUrl, {
-      ...(sslConfig.ssl !== undefined ? { ssl: sslConfig.ssl } : {}),
-      onError,
-      onConnect: async (client) => {
-        // Force fully qualified names in catalog queries
-        await client.query("SET search_path = ''");
-        if (options.role) {
-          await client.query(`SET ROLE ${escapeIdentifier(options.role)}`);
-        }
-      },
-    });
-    shouldCloseSource = true;
-  } else {
-    sourcePool = source;
-  }
+  /**
+   * Resolve a CatalogInput to a Catalog, tracking pools that need cleanup.
+   */
+  const resolveCatalog = async (
+    input: CatalogInput,
+    label: "source" | "target",
+    pools: Array<{ pool: Pool; shouldClose: boolean }>,
+  ): Promise<Catalog> => {
+    if (input instanceof Catalog) {
+      return input;
+    }
+    const resolved = await resolvePool(input, label);
+    pools.push(resolved);
+    return extractCatalog(resolved.pool);
+  };
 
-  if (typeof target === "string") {
-    const sslConfig = await parseSslConfig(target, "target");
-    targetPool = createPool(sslConfig.cleanedUrl, {
-      ...(sslConfig.ssl !== undefined ? { ssl: sslConfig.ssl } : {}),
-      onError,
-      onConnect: async (client) => {
-        // Force fully qualified names in catalog queries
-        await client.query("SET search_path = ''");
-        if (options.role) {
-          await client.query(`SET ROLE ${escapeIdentifier(options.role)}`);
-        }
-      },
-    });
-    shouldCloseTarget = true;
-  } else {
-    targetPool = target;
-  }
-
-  const sourceExtraction = extractCatalog(sourcePool);
-  const targetExtraction = extractCatalog(targetPool);
+  const pools: Array<{ pool: Pool; shouldClose: boolean }> = [];
 
   try {
-    const [fromCatalog, toCatalog] = await Promise.all([
-      sourceExtraction,
-      targetExtraction,
-    ]);
+    const toCatalog = await resolveCatalog(target, "target", pools);
+
+    const fromCatalog =
+      source !== null
+        ? await resolveCatalog(source, "source", pools)
+        : await createEmptyCatalog(toCatalog.version, toCatalog.currentUser);
 
     return buildPlanForCatalogs(fromCatalog, toCatalog, options);
-  } catch (error) {
-    // When one extraction fails, the other may still have in-flight queries.
-    // Wait for both to settle before pool cleanup to prevent unhandled
-    // rejections from connections being terminated mid-flight.
-    await Promise.allSettled([sourceExtraction, targetExtraction]);
-    throw error;
   } finally {
-    const closers: Promise<unknown>[] = [];
-    if (shouldCloseSource) closers.push(endPool(sourcePool));
-    if (shouldCloseTarget) closers.push(endPool(targetPool));
-    if (closers.length) {
-      await Promise.all(closers);
-    }
+    const closers = pools
+      .filter((p) => p.shouldClose)
+      .map((p) => endPool(p.pool));
+    if (closers.length) await Promise.all(closers);
   }
 }
 
@@ -291,6 +119,7 @@ function buildPlanForCatalogs(
 ): { plan: Plan; sortedChanges: Change[]; ctx: DiffContext } | null {
   const changes = diffCatalogs(fromCatalog, toCatalog, {
     role: options.role,
+    skipDefaultPrivilegeSubtraction: options.skipDefaultPrivilegeSubtraction,
   });
 
   const filterOption = options.filter;
@@ -331,9 +160,23 @@ function buildPlanForCatalogs(
   // Use filter from final integration
   const filterFn = finalIntegration?.filter;
 
-  const filteredChanges = filterFn
+  let filteredChanges = filterFn
     ? changes.filter((change) => filterFn(change))
     : changes;
+
+  // Cascade dependency exclusions: when a change is excluded by the filter,
+  // also exclude changes that depend on it (via requires or pg_depend).
+  // DSL filters: cascade only if explicitly opted in (cascade: true). Function filters: cascade by default.
+  const shouldCascade = isFilterDSL
+    ? (filterDSL as Record<string, unknown>)?.cascade === true
+    : true;
+  if (filterFn && filteredChanges.length < changes.length && shouldCascade) {
+    filteredChanges = cascadeExclusions(
+      filteredChanges,
+      changes,
+      toCatalog.depends,
+    );
+  }
 
   if (filteredChanges.length === 0) {
     return null;
@@ -350,6 +193,99 @@ function buildPlanForCatalogs(
   );
 
   return { plan, sortedChanges, ctx };
+}
+
+// ============================================================================
+// Dependency Cascading
+// ============================================================================
+
+/**
+ * Cascade exclusions through dependency relationships.
+ *
+ * When a change is excluded by the filter, any change that depends on it
+ * (via explicit `requires` or via catalog `pg_depend`) should also be excluded.
+ * This runs as a fixpoint loop, bounded by the total number of changes to
+ * guarantee deterministic termination.
+ *
+ * @param filteredChanges - Changes that passed the initial filter
+ * @param allChanges - All changes before filtering
+ * @param catalogDepends - Dependency rows from the target catalog (pg_depend)
+ * @returns The filtered changes with cascading exclusions applied
+ */
+function cascadeExclusions(
+  filteredChanges: Change[],
+  allChanges: Change[],
+  catalogDepends: PgDependRow[],
+): Change[] {
+  // Collect stableIds created by initially-excluded changes
+  const filteredSet = new Set(filteredChanges);
+  const excludedIds = new Set<string>();
+  for (const change of allChanges) {
+    if (!filteredSet.has(change)) {
+      for (const id of change.creates ?? []) {
+        excludedIds.add(id);
+      }
+    }
+  }
+
+  if (excludedIds.size === 0) {
+    return filteredChanges;
+  }
+
+  // Build reverse dependency map: referenced_stable_id -> Set(dependent_stable_ids)
+  const catalogDependents = new Map<string, Set<string>>();
+  for (const dep of catalogDepends) {
+    const existing = catalogDependents.get(dep.referenced_stable_id);
+    if (existing) {
+      existing.add(dep.dependent_stable_id);
+    } else {
+      catalogDependents.set(
+        dep.referenced_stable_id,
+        new Set([dep.dependent_stable_id]),
+      );
+    }
+  }
+
+  // Fixpoint loop: bounded by total changes to guarantee termination.
+  // Each iteration must remove at least one change, otherwise we break.
+  let result = filteredChanges;
+  for (let i = 0; i < allChanges.length; i++) {
+    const beforeLength = result.length;
+    result = result.filter((change) => {
+      // Check explicit requirements: does this change require an excluded id?
+      const requires = change.requires ?? [];
+      if (requires.some((dep) => excludedIds.has(dep))) {
+        for (const id of change.creates ?? []) {
+          excludedIds.add(id);
+        }
+        return false;
+      }
+
+      // Check catalog dependencies: does anything this change creates
+      // depend on an excluded id via pg_depend?
+      const creates = change.creates ?? [];
+      for (const createdId of creates) {
+        for (const excludedId of excludedIds) {
+          const dependents = catalogDependents.get(excludedId);
+          if (dependents?.has(createdId)) {
+            for (const id of creates) {
+              excludedIds.add(id);
+            }
+            return false;
+          }
+        }
+      }
+
+      return true;
+    });
+
+    // No changes removed this iteration — fixpoint reached
+    if (result.length === beforeLength) {
+      break;
+    }
+  }
+
+  return result;
 }
 
 // ============================================================================

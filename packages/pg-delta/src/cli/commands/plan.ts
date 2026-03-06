@@ -10,7 +10,9 @@ import type { SerializeDSL } from "../../core/integrations/serialize/dsl.ts";
 import type { ChangeSerializer } from "../../core/integrations/serialize/serialize.types.ts";
 import { createPlan } from "../../core/plan/index.ts";
 import type { SqlFormatOptions } from "../../core/plan/sql-format.ts";
+import { setCommandExitCode } from "../exit-code.ts";
 import { loadIntegrationDSL } from "../utils/integrations.ts";
+import { isPostgresUrl, loadCatalogFromFile } from "../utils/resolve-input.ts";
 import { formatPlanForDisplay } from "../utils.ts";
 
 export const planCommand = buildCommand({
@@ -18,12 +20,15 @@ export const planCommand = buildCommand({
     flags: {
       source: {
         kind: "parsed",
-        brief: "Source database connection URL (current state)",
+        brief:
+          "Source (current state): postgres URL or catalog snapshot file path. Omit for empty baseline.",
         parse: String,
+        optional: true,
       },
       target: {
         kind: "parsed",
-        brief: "Target database connection URL (desired state)",
+        brief:
+          "Target (desired state): postgres URL or catalog snapshot file path",
         parse: String,
       },
       format: {
@@ -121,7 +126,7 @@ json/sql outputs are available for artifacts or piping.
   async func(
     this: CommandContext,
     flags: {
-      source: string;
+      source?: string;
       target: string;
       format?: "json" | "sql";
       output?: string;
@@ -133,18 +138,34 @@ json/sql outputs are available for artifacts or piping.
       "sql-format-options"?: SqlFormatOptions;
     },
   ) {
-    // Load integration if provided and extract filter/serialize DSL
     let filterOption: FilterDSL | ChangeFilter | undefined = flags.filter;
     let serializeOption: SerializeDSL | ChangeSerializer | undefined =
       flags.serialize;
+    let integrationEmptyCatalog:
+      | import("../../core/catalog.snapshot.ts").CatalogSnapshot
+      | undefined;
     if (flags.integration) {
       const integrationDSL = await loadIntegrationDSL(flags.integration);
-      // Use integration DSL if explicit flags not provided
       filterOption = filterOption ?? integrationDSL.filter;
       serializeOption = serializeOption ?? integrationDSL.serialize;
+      integrationEmptyCatalog = integrationDSL.emptyCatalog;
     }
 
-    const planResult = await createPlan(flags.source, flags.target, {
+    const resolvedSource = flags.source
+      ? isPostgresUrl(flags.source)
+        ? flags.source
+        : await loadCatalogFromFile(flags.source)
+      : integrationEmptyCatalog
+        ? (await import("../../core/catalog.snapshot.ts")).deserializeCatalog(
+            integrationEmptyCatalog,
+          )
+        : null;
+
+    const resolvedTarget = isPostgresUrl(flags.target)
+      ? flags.target
+      : await loadCatalogFromFile(flags.target);
+
+    const planResult = await createPlan(resolvedSource, resolvedTarget, {
       role: flags.role,
       filter: filterOption,
       serialize: serializeOption,
@@ -190,6 +211,6 @@ json/sql outputs are available for artifacts or piping.
     }
 
     // Exit code 2 indicates changes were detected
-    process.exitCode = 2;
+    setCommandExitCode(2);
   },
 });

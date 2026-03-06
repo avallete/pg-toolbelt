@@ -21,6 +21,9 @@ lib-cov
 
 # Coverage directory used by tools like istanbul
 coverage
+coverage-html
+.coverage-artifacts/
+rtk/
 *.lcov
 
 # nyc test coverage
@@ -143,3 +146,30 @@ node_modules/
 
 # dist
 dist/
+dev-debug.log
+# Environment variables
+# Editor directories and files
+.idea
+.vscode
+.cursor/
+.claude/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# OS specific
+.DS_Store
+
+# Task files
+# tasks.json
+# tasks/ 
+
+# Declarative schemas
+declarative-schemas/
+
+
+# ===================
+# tldr ignore patterns
+# ===================
+.tldr/

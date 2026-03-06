@@ -4,6 +4,7 @@ import z from "zod";
 import {
   BasePgModel,
   columnPropsSchema,
+  normalizeColumns,
   type TableLikeObject,
 } from "../base.model.ts";
 import {
@@ -115,26 +116,11 @@ export class View extends BasePgModel implements TableLikeObject {
   }
 
   override stableSnapshot() {
-    const normalizeColumns = () =>
-      [...this.columns]
-        .map((col) => {
-          const { position: _pos, ...rest } = col as unknown as Record<
-            string,
-            unknown
-          >;
-          return rest;
-        })
-        .sort((a, b) => {
-          const nameA = (a.name as string | undefined) ?? "";
-          const nameB = (b.name as string | undefined) ?? "";
-          return nameA.localeCompare(nameB);
-        });
-
     return {
       identity: this.identityFields,
       data: {
         ...this.dataFields,
-        columns: normalizeColumns(),
+        columns: normalizeColumns(this.columns),
       },
     };
   }
@@ -244,7 +230,7 @@ select
       from (
         -- one row for object ACL + one row per column ACL
         select null::name as attname, v.oid as relacl_oid, (
-          select c_rel.relacl from pg_class c_rel where c_rel.oid = v.oid
+          select COALESCE(c_rel.relacl, acldefault('r', c_rel.relowner)) from pg_class c_rel where c_rel.oid = v.oid
         ) as acl
         union all
         select a2.attname, v.oid as relacl_oid, a2.attacl

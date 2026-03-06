@@ -18,6 +18,7 @@ const defaultPrivilegeSchema = z.object({
   privileges: z.array(
     z.object({ privilege: z.string(), grantable: z.boolean() }),
   ),
+  is_implicit: z.boolean(),
 });
 
 const rolePropsSchema = z.object({
@@ -95,15 +96,18 @@ export class Role extends BasePgModel {
       );
     });
 
-    const sortedDefaultPrivs = [...this.default_privileges].map((dp) => ({
-      ...dp,
-      privileges: [...dp.privileges].sort((a, b) => {
-        return (
-          a.privilege.localeCompare(b.privilege) ||
-          Number(a.grantable) - Number(b.grantable)
-        );
-      }),
-    }));
+    const sortedDefaultPrivs = [...this.default_privileges].map((dp) => {
+      const { is_implicit: _, ...rest } = dp;
+      return {
+        ...rest,
+        privileges: [...dp.privileges].sort((a, b) => {
+          return (
+            a.privilege.localeCompare(b.privilege) ||
+            Number(a.grantable) - Number(b.grantable)
+          );
+        }),
+      };
+    });
     sortedDefaultPrivs.sort((a, b) => {
       return (
         (a.in_schema ?? "").localeCompare(b.in_schema ?? "") ||
@@ -202,13 +206,15 @@ export async function extractRoles(pool: Pool): Promise<Role[]> {
                                     THEN 'PUBLIC'
                                     ELSE s.grantee::regrole::text
                             END,
-                          'privileges', s.privileges
+                          'privileges', s.privileges,
+                          'is_implicit', s.is_implicit
                         )
                         ORDER BY s.defaclnamespace NULLS FIRST,
                                   s.defaclobjtype,
                                   s.grantee
                       )
                 FROM (
+                  -- Explicit entries from pg_default_acl
                   SELECT
                     d.defaclnamespace,
                     d.defaclobjtype,
@@ -219,12 +225,41 @@ export async function extractRoles(pool: Pool): Promise<Role[]> {
                         'grantable',  x.is_grantable
                       )
                       ORDER BY x.privilege_type, x.is_grantable
-                    ) AS privileges
+                    ) AS privileges,
+                    false AS is_implicit
                   FROM pg_default_acl d
                   CROSS JOIN LATERAL aclexplode(COALESCE(d.defaclacl, ARRAY[]::aclitem[]))
                     AS x(grantor, grantee, privilege_type, is_grantable)
                   WHERE d.defaclrole = r.oid
                   GROUP BY d.defaclnamespace, d.defaclobjtype, x.grantee
+                  UNION ALL
+                  -- Implicit defaults from acldefault() for objtypes without a
+                  -- global pg_default_acl entry.  PostgreSQL applies these implicit
+                  -- defaults (e.g. PUBLIC gets EXECUTE on functions) when no
+                  -- explicit ALTER DEFAULT PRIVILEGES has been issued.  Including
+                  -- them lets the diff detect REVOKEs of implicit grants.
+                  SELECT
+                    0 AS defaclnamespace,
+                    v.t::"char" AS defaclobjtype,
+                    x.grantee,
+                    json_agg(
+                      json_build_object(
+                        'privilege',  x.privilege_type,
+                        'grantable',  x.is_grantable
+                      )
+                      ORDER BY x.privilege_type, x.is_grantable
+                    ) AS privileges,
+                    true AS is_implicit
+                  FROM (VALUES ('r'), ('S'), ('f'), ('T'), ('n')) AS v(t)
+                  CROSS JOIN LATERAL aclexplode(acldefault(v.t::"char", r.oid))
+                    AS x(grantor, grantee, privilege_type, is_grantable)
+                  WHERE NOT EXISTS (
+                    SELECT 1 FROM pg_default_acl d2
+                    WHERE d2.defaclrole     = r.oid
+                      AND d2.defaclobjtype  = v.t::"char"
+                      AND d2.defaclnamespace = 0
+                  )
+                  GROUP BY v.t, x.grantee
                 ) AS s
               ),
               '[]'
@@ -292,13 +327,15 @@ export async function extractRoles(pool: Pool): Promise<Role[]> {
                                     THEN 'PUBLIC'
                                     ELSE s.grantee::regrole::text
                             END,
-                          'privileges', s.privileges
+                          'privileges', s.privileges,
+                          'is_implicit', s.is_implicit
                         )
                         ORDER BY s.defaclnamespace NULLS FIRST,
                                   s.defaclobjtype,
                                   s.grantee
                       )
                 FROM (
+                  -- Explicit entries from pg_default_acl
                   SELECT
                     d.defaclnamespace,
                     d.defaclobjtype,
@@ -309,12 +346,41 @@ export async function extractRoles(pool: Pool): Promise<Role[]> {
                         'grantable',  x.is_grantable
                       )
                       ORDER BY x.privilege_type, x.is_grantable
-                    ) AS privileges
+                    ) AS privileges,
+                    false AS is_implicit
                   FROM pg_default_acl d
                   CROSS JOIN LATERAL aclexplode(COALESCE(d.defaclacl, ARRAY[]::aclitem[]))
                     AS x(grantor, grantee, privilege_type, is_grantable)
                   WHERE d.defaclrole = r.oid
                   GROUP BY d.defaclnamespace, d.defaclobjtype, x.grantee
+                  UNION ALL
+                  -- Implicit defaults from acldefault() for objtypes without a
+                  -- global pg_default_acl entry.  PostgreSQL applies these implicit
+                  -- defaults (e.g. PUBLIC gets EXECUTE on functions) when no
+                  -- explicit ALTER DEFAULT PRIVILEGES has been issued.  Including
+                  -- them lets the diff detect REVOKEs of implicit grants.
+                  SELECT
+                    0 AS defaclnamespace,
+                    v.t::"char" AS defaclobjtype,
+                    x.grantee,
+                    json_agg(
+                      json_build_object(
+                        'privilege',  x.privilege_type,
+                        'grantable',  x.is_grantable
+                      )
+                      ORDER BY x.privilege_type, x.is_grantable
+                    ) AS privileges,
+                    true AS is_implicit
+                  FROM (VALUES ('r'), ('S'), ('f'), ('T'), ('n')) AS v(t)
+                  CROSS JOIN LATERAL aclexplode(acldefault(v.t::"char", r.oid))
+                    AS x(grantor, grantee, privilege_type, is_grantable)
+                  WHERE NOT EXISTS (
+                    SELECT 1 FROM pg_default_acl d2
+                    WHERE d2.defaclrole     = r.oid
+                      AND d2.defaclobjtype  = v.t::"char"
+                      AND d2.defaclnamespace = 0
+                  )
+                  GROUP BY v.t, x.grantee
                 ) AS s
               ),
               '[]'

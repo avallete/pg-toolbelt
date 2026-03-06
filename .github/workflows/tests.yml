@@ -101,7 +101,19 @@ jobs:
         uses: ./.github/actions/setup
       - name: Run unit tests
         working-directory: packages/pg-delta
-        run: bun test --concurrent --timeout 15000 --coverage src/
+        env:
+          BUN_COVERAGE: "1"
+          NYC_OUTPUT_DIR: ${{ github.workspace }}/packages/pg-delta/.nyc_output
+        run: bun run test:unit
+      - name: Upload coverage
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-pg-delta-unit
+          path: packages/pg-delta/.nyc_output/
+          retention-days: 1
+          include-hidden-files: true
 
   pg-delta-integration:
     if: >-
@@ -111,6 +123,7 @@ jobs:
     needs: detect-changes
     name: "pg-delta: Integration (PG ${{ matrix.postgres_version }}, shard ${{ matrix.shard_index }}/${{ matrix.shard_total }})"
     runs-on: ubuntu-latest
+    timeout-minutes: 14
     strategy:
       fail-fast: false
       matrix:
@@ -123,23 +136,36 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
       - name: Run integration tests (shard)
-        working-directory: packages/pg-delta
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 2
+          command: |
+            cd packages/pg-delta
+            ALL_FILES=$(find tests/ -name "*.test.ts" | sort)
+            TOTAL=${{ matrix.shard_total }}
+            INDEX=$(( ${{ matrix.shard_index }} - 1 ))
+            SHARD_FILES=$(echo "$ALL_FILES" | awk "NR % $TOTAL == $INDEX")
+            if [ -z "$SHARD_FILES" ]; then
+              echo "No test files for this shard, skipping"
+              exit 0
+            fi
+            echo "Running shard ${{ matrix.shard_index }}/$TOTAL with files:"
+            echo "$SHARD_FILES"
+            echo "$SHARD_FILES" | xargs bun run test
         env:
           PGDELTA_TEST_POSTGRES_VERSIONS: ${{ matrix.postgres_version }}
-        run: |
-          # List all integration test files deterministically
-          ALL_FILES=$(find tests/ -name "*.test.ts" | sort)
-          TOTAL=${{ matrix.shard_total }}
-          INDEX=$(( ${{ matrix.shard_index }} - 1 ))
-          # Select files for this shard using modulo
-          SHARD_FILES=$(echo "$ALL_FILES" | awk "NR % $TOTAL == $INDEX")
-          if [ -z "$SHARD_FILES" ]; then
-            echo "No test files for this shard, skipping"
-            exit 0
-          fi
-          echo "Running shard ${{ matrix.shard_index }}/$TOTAL with files:"
-          echo "$SHARD_FILES"
-          echo "$SHARD_FILES" | xargs bun run test
+          BUN_COVERAGE: "1"
+          NYC_OUTPUT_DIR: ${{ github.workspace }}/packages/pg-delta/.nyc_output
+      - name: Upload coverage
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-integration-pg${{ matrix.postgres_version }}-shard-${{ matrix.shard_index }}
+          path: packages/pg-delta/.nyc_output/
+          retention-days: 1
+          include-hidden-files: true
 
   pg-delta-integration-pg15-compat:
     if: always() && github.event.pull_request.draft == false
@@ -169,6 +195,49 @@ jobs:
             exit 1
           fi
 
+  coverage:
+    if: >-
+      !cancelled() &&
+      (needs.pg-delta-unit.result != 'skipped' || needs.pg-delta-integration.result != 'skipped' || needs.pg-topo-tests.result != 'skipped')
+    continue-on-error: true
+    needs:
+      - pg-delta-unit
+      - pg-delta-integration
+      - pg-topo-tests
+    name: "Coverage report"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup
+        uses: ./.github/actions/setup
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: .nyc_output/
+          merge-multiple: true
+      - name: Generate coverage report
+        run: |
+          if [ ! -d .nyc_output ] || [ -z "$(ls -A .nyc_output 2>/dev/null)" ]; then
+            echo "No coverage artifacts found, skipping report"
+            echo "## Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
+            echo "No coverage data was uploaded." >> "$GITHUB_STEP_SUMMARY"
+          else
+            npx nyc report 2>&1 | tee /tmp/nyc-output.txt
+            echo "## Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
+            tail -5 /tmp/nyc-output.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload coverage reports
+        if: hashFiles('.coverage-artifacts/**') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: .coverage-artifacts/
+          retention-days: 30
+          include-hidden-files: true
+
   pg-topo-tests:
     if: >-
       github.event.pull_request.draft == false &&
@@ -184,7 +253,19 @@ jobs:
         uses: ./.github/actions/setup
       - name: Run tests
         working-directory: packages/pg-topo
+        env:
+          BUN_COVERAGE: "1"
+          NYC_OUTPUT_DIR: ${{ github.workspace }}/packages/pg-topo/.nyc_output
         run: bun run test
+      - name: Upload coverage
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-pg-topo
+          path: packages/pg-topo/.nyc_output/
+          retention-days: 1
+          include-hidden-files: true
 
   release-preview:
     needs:

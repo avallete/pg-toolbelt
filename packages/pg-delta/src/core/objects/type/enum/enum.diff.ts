@@ -1,11 +1,10 @@
-import type { DefaultPrivilegeState } from "../../base.default-privileges.ts";
 import { diffObjects } from "../../base.diff.ts";
 import {
   diffPrivileges,
+  emitObjectPrivilegeChanges,
   filterPublicBuiltInDefaults,
-  groupPrivilegesByGrantable,
 } from "../../base.privilege-diff.ts";
-import type { Role } from "../../role/role.model.ts";
+import type { ObjectDiffContext } from "../../diff-context.ts";
 import {
   AlterEnumAddValue,
   AlterEnumChangeOwner,
@@ -33,12 +32,10 @@ import type { Enum } from "./enum.model.ts";
  * @returns A list of changes to apply to main to make it match branch.
  */
 export function diffEnums(
-  ctx: {
-    version: number;
-    currentUser: string;
-    defaultPrivilegeState: DefaultPrivilegeState;
-    mainRoles: Record<string, Role>;
-  },
+  ctx: Pick<
+    ObjectDiffContext,
+    "version" | "currentUser" | "defaultPrivilegeState"
+  >,
   main: Record<string, Enum>,
   branch: Record<string, Enum>,
 ): EnumChange[] {
@@ -75,6 +72,10 @@ export function diffEnums(
       "enum",
       createdEnum.schema ?? "",
     );
+    const creatorFilteredDefaults =
+      createdEnum.owner !== ctx.currentUser
+        ? effectiveDefaults.filter((p) => p.grantee !== ctx.currentUser)
+        : effectiveDefaults;
     // Filter out PUBLIC's built-in default USAGE privilege (PostgreSQL grants it automatically)
     // Reference: https://www.postgresql.org/docs/17/ddl-priv.html Table 5.2
     // This prevents generating unnecessary "GRANT USAGE TO PUBLIC" statements
@@ -85,57 +86,25 @@ export function diffEnums(
     // Filter out owner privileges - owner always has ALL privileges implicitly
     // and shouldn't be compared. Use the enum owner as the reference.
     const privilegeResults = diffPrivileges(
-      effectiveDefaults,
+      filterPublicBuiltInDefaults("enum", creatorFilteredDefaults),
       desiredPrivileges,
       createdEnum.owner,
-      ctx.mainRoles,
     );
 
-    // Generate grant changes
-    for (const [grantee, result] of privilegeResults) {
-      if (result.grants.length > 0) {
-        const grantGroups = groupPrivilegesByGrantable(result.grants);
-        for (const [grantable, list] of grantGroups) {
-          void grantable;
-          changes.push(
-            new GrantEnumPrivileges({
-              enum: createdEnum,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke changes
-      if (result.revokes.length > 0) {
-        const revokeGroups = groupPrivilegesByGrantable(result.revokes);
-        for (const [grantable, list] of revokeGroups) {
-          void grantable;
-          changes.push(
-            new RevokeEnumPrivileges({
-              enum: createdEnum,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke grant option changes
-      if (result.revokeGrantOption.length > 0) {
-        changes.push(
-          new RevokeGrantOptionEnumPrivileges({
-            enum: createdEnum,
-            grantee,
-            privilegeNames: result.revokeGrantOption,
-            version: ctx.version,
-          }),
-        );
-      }
-    }
+    changes.push(
+      ...(emitObjectPrivilegeChanges(
+        privilegeResults,
+        createdEnum,
+        createdEnum,
+        "enum",
+        {
+          Grant: GrantEnumPrivileges,
+          Revoke: RevokeEnumPrivileges,
+          RevokeGrantOption: RevokeGrantOptionEnumPrivileges,
+        },
+        ctx.version,
+      ) as EnumChange[]),
+    );
   }
 
   for (const enumId of dropped) {
@@ -173,59 +142,34 @@ export function diffEnums(
         "enum",
         branchEnum.schema ?? "",
       );
+      const creatorFilteredDefaults =
+        branchEnum.owner !== ctx.currentUser
+          ? effectiveDefaults.filter((p) => p.grantee !== ctx.currentUser)
+          : effectiveDefaults;
       const desiredPrivileges = filterPublicBuiltInDefaults(
         "enum",
         branchEnum.privileges,
       );
       const privilegeResults = diffPrivileges(
-        effectiveDefaults,
+        filterPublicBuiltInDefaults("enum", creatorFilteredDefaults),
         desiredPrivileges,
         branchEnum.owner,
-        ctx.mainRoles,
       );
 
-      for (const [grantee, result] of privilegeResults) {
-        if (result.grants.length > 0) {
-          const grantGroups = groupPrivilegesByGrantable(result.grants);
-          for (const [grantable, list] of grantGroups) {
-            void grantable;
-            changes.push(
-              new GrantEnumPrivileges({
-                enum: branchEnum,
-                grantee,
-                privileges: list,
-                version: ctx.version,
-              }),
-            );
-          }
-        }
-
-        if (result.revokes.length > 0) {
-          const revokeGroups = groupPrivilegesByGrantable(result.revokes);
-          for (const [grantable, list] of revokeGroups) {
-            void grantable;
-            changes.push(
-              new RevokeEnumPrivileges({
-                enum: branchEnum,
-                grantee,
-                privileges: list,
-                version: ctx.version,
-              }),
-            );
-          }
-        }
-
-        if (result.revokeGrantOption.length > 0) {
-          changes.push(
-            new RevokeGrantOptionEnumPrivileges({
-              enum: branchEnum,
-              grantee,
-              privilegeNames: result.revokeGrantOption,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
+      changes.push(
+        ...(emitObjectPrivilegeChanges(
+          privilegeResults,
+          branchEnum,
+          branchEnum,
+          "enum",
+          {
+            Grant: GrantEnumPrivileges,
+            Revoke: RevokeEnumPrivileges,
+            RevokeGrantOption: RevokeGrantOptionEnumPrivileges,
+          },
+          ctx.version,
+        ) as EnumChange[]),
+      );
 
       continue;
     }
@@ -270,54 +214,22 @@ export function diffEnums(
       mainPrivilegesFiltered,
       branchPrivilegesFiltered,
       branchEnum.owner,
-      ctx.mainRoles,
     );
 
-    for (const [grantee, result] of privilegeResults) {
-      // Generate grant changes
-      if (result.grants.length > 0) {
-        const grantGroups = groupPrivilegesByGrantable(result.grants);
-        for (const [grantable, list] of grantGroups) {
-          void grantable;
-          changes.push(
-            new GrantEnumPrivileges({
-              enum: branchEnum,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke changes
-      if (result.revokes.length > 0) {
-        const revokeGroups = groupPrivilegesByGrantable(result.revokes);
-        for (const [grantable, list] of revokeGroups) {
-          void grantable;
-          changes.push(
-            new RevokeEnumPrivileges({
-              enum: mainEnum,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke grant option changes
-      if (result.revokeGrantOption.length > 0) {
-        changes.push(
-          new RevokeGrantOptionEnumPrivileges({
-            enum: mainEnum,
-            grantee,
-            privilegeNames: result.revokeGrantOption,
-            version: ctx.version,
-          }),
-        );
-      }
-    }
+    changes.push(
+      ...(emitObjectPrivilegeChanges(
+        privilegeResults,
+        branchEnum,
+        mainEnum,
+        "enum",
+        {
+          Grant: GrantEnumPrivileges,
+          Revoke: RevokeEnumPrivileges,
+          RevokeGrantOption: RevokeGrantOptionEnumPrivileges,
+        },
+        ctx.version,
+      ) as EnumChange[]),
+    );
 
     // Note: Enum renaming would also use ALTER TYPE ... RENAME TO ...
     // But since our Enum model uses 'name' as the identity field,

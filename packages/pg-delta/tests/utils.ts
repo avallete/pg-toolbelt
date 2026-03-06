@@ -8,15 +8,16 @@ import { containerManager } from "./container-manager.js";
 import { SupabasePostgreSqlContainer } from "./supabase-postgres.js";
 
 /**
- * Suppress expected shutdown errors from idle pool connections.
- * Error code 57P01 = admin_shutdown (container stopped while connection open)
+ * Suppress expected errors from idle pool connections.
+ * 57P01 = admin_shutdown (container stopped while connection open)
+ * 53100 = disk_full (container out of disk under heavy concurrent tests)
  */
 function suppressShutdownError(err: Error & { code?: string }) {
-  if (err.code === "57P01") return;
+  if (err.code === "57P01" || err.code === "53100") return;
   console.error("Pool error:", err);
 }
 
-type DbFixture = { main: Pool; branch: Pool };
+export type DbFixture = { main: Pool; branch: Pool };
 
 /**
  * Default test utility using Alpine PostgreSQL containers with single container per version.
@@ -79,11 +80,9 @@ export function withDbSupabaseIsolated(
       new SupabasePostgreSqlContainer(image).start(),
     ]);
     const main = createPool(containerMain.getConnectionUri(), {
-      max: 5,
       onError: suppressShutdownError,
     });
     const branch = createPool(containerBranch.getConnectionUri(), {
-      max: 5,
       onError: suppressShutdownError,
     });
 

@@ -1080,6 +1080,7 @@ const trigger = new Trigger({
   schema: "public",
   name: "trg_audit",
   table_name: "table_with_very_long_name_for_formatting_and_wrapping_test",
+  table_relkind: "r",
   function_schema: "public",
   function_name: "audit_trigger_fn",
   trigger_type: 7,
@@ -1252,6 +1253,7 @@ const role = new Role({
       objtype: "r",
       grantee: "app_reader",
       privileges: [{ privilege: "SELECT", grantable: false }],
+      is_implicit: false,
     },
   ],
 });

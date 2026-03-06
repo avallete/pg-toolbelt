@@ -1,11 +1,10 @@
-import type { DefaultPrivilegeState } from "../base.default-privileges.ts";
 import { diffObjects } from "../base.diff.ts";
 import {
   diffPrivileges,
+  emitObjectPrivilegeChanges,
   filterPublicBuiltInDefaults,
-  groupPrivilegesByGrantable,
 } from "../base.privilege-diff.ts";
-import type { Role } from "../role/role.model.ts";
+import type { ObjectDiffContext } from "../diff-context.ts";
 import {
   AlterDomainAddConstraint,
   AlterDomainChangeOwner,
@@ -39,12 +38,10 @@ import type { Domain } from "./domain.model.ts";
  * @returns A list of changes to apply to main to make it match branch.
  */
 export function diffDomains(
-  ctx: {
-    version: number;
-    currentUser: string;
-    defaultPrivilegeState: DefaultPrivilegeState;
-    mainRoles: Record<string, Role>;
-  },
+  ctx: Pick<
+    ObjectDiffContext,
+    "version" | "currentUser" | "defaultPrivilegeState"
+  >,
   main: Record<string, Domain>,
   branch: Record<string, Domain>,
 ): DomainChange[] {
@@ -99,6 +96,10 @@ export function diffDomains(
       "domain",
       newDomain.schema ?? "",
     );
+    const creatorFilteredDefaults =
+      newDomain.owner !== ctx.currentUser
+        ? effectiveDefaults.filter((p) => p.grantee !== ctx.currentUser)
+        : effectiveDefaults;
     // Filter out PUBLIC's built-in default USAGE privilege (PostgreSQL grants it automatically)
     // Reference: https://www.postgresql.org/docs/17/ddl-priv.html Table 5.2
     // This prevents generating unnecessary "GRANT USAGE TO PUBLIC" statements
@@ -109,57 +110,25 @@ export function diffDomains(
     // Filter out owner privileges - owner always has ALL privileges implicitly
     // and shouldn't be compared. Use the domain owner as the reference.
     const privilegeResults = diffPrivileges(
-      effectiveDefaults,
+      filterPublicBuiltInDefaults("domain", creatorFilteredDefaults),
       desiredPrivileges,
       newDomain.owner,
-      ctx.mainRoles,
     );
 
-    // Generate grant changes
-    for (const [grantee, result] of privilegeResults) {
-      if (result.grants.length > 0) {
-        const grantGroups = groupPrivilegesByGrantable(result.grants);
-        for (const [grantable, list] of grantGroups) {
-          void grantable;
-          changes.push(
-            new GrantDomainPrivileges({
-              domain: newDomain,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke changes
-      if (result.revokes.length > 0) {
-        const revokeGroups = groupPrivilegesByGrantable(result.revokes);
-        for (const [grantable, list] of revokeGroups) {
-          void grantable;
-          changes.push(
-            new RevokeDomainPrivileges({
-              domain: newDomain,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke grant option changes
-      if (result.revokeGrantOption.length > 0) {
-        changes.push(
-          new RevokeGrantOptionDomainPrivileges({
-            domain: newDomain,
-            grantee,
-            privilegeNames: result.revokeGrantOption,
-            version: ctx.version,
-          }),
-        );
-      }
-    }
+    changes.push(
+      ...(emitObjectPrivilegeChanges(
+        privilegeResults,
+        newDomain,
+        newDomain,
+        "domain",
+        {
+          Grant: GrantDomainPrivileges,
+          Revoke: RevokeDomainPrivileges,
+          RevokeGrantOption: RevokeGrantOptionDomainPrivileges,
+        },
+        ctx.version,
+      ) as DomainChange[]),
+    );
   }
 
   for (const domainId of dropped) {
@@ -304,54 +273,22 @@ export function diffDomains(
       mainPrivilegesFiltered,
       branchPrivilegesFiltered,
       branchDomain.owner,
-      ctx.mainRoles,
     );
 
-    for (const [grantee, result] of privilegeResults) {
-      // Generate grant changes
-      if (result.grants.length > 0) {
-        const grantGroups = groupPrivilegesByGrantable(result.grants);
-        for (const [grantable, list] of grantGroups) {
-          void grantable;
-          changes.push(
-            new GrantDomainPrivileges({
-              domain: branchDomain,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke changes
-      if (result.revokes.length > 0) {
-        const revokeGroups = groupPrivilegesByGrantable(result.revokes);
-        for (const [grantable, list] of revokeGroups) {
-          void grantable;
-          changes.push(
-            new RevokeDomainPrivileges({
-              domain: mainDomain,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke grant option changes
-      if (result.revokeGrantOption.length > 0) {
-        changes.push(
-          new RevokeGrantOptionDomainPrivileges({
-            domain: mainDomain,
-            grantee,
-            privilegeNames: result.revokeGrantOption,
-            version: ctx.version,
-          }),
-        );
-      }
-    }
+    changes.push(
+      ...(emitObjectPrivilegeChanges(
+        privilegeResults,
+        branchDomain,
+        mainDomain,
+        "domain",
+        {
+          Grant: GrantDomainPrivileges,
+          Revoke: RevokeDomainPrivileges,
+          RevokeGrantOption: RevokeGrantOptionDomainPrivileges,
+        },
+        ctx.version,
+      ) as DomainChange[]),
+    );
   }
 
   return changes;

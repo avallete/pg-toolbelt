@@ -1,11 +1,10 @@
-import type { DefaultPrivilegeState } from "../../base.default-privileges.ts";
 import { diffObjects } from "../../base.diff.ts";
 import {
   diffPrivileges,
+  emitObjectPrivilegeChanges,
   filterPublicBuiltInDefaults,
-  groupPrivilegesByGrantable,
 } from "../../base.privilege-diff.ts";
-import type { Role } from "../../role/role.model.ts";
+import type { ObjectDiffContext } from "../../diff-context.ts";
 import { hasNonAlterableChanges } from "../../utils.ts";
 import { AlterRangeChangeOwner } from "./changes/range.alter.ts";
 import {
@@ -31,12 +30,10 @@ import type { Range } from "./range.model.ts";
  * @returns A list of changes to apply to main to make it match branch.
  */
 export function diffRanges(
-  ctx: {
-    version: number;
-    currentUser: string;
-    defaultPrivilegeState: DefaultPrivilegeState;
-    mainRoles: Record<string, Role>;
-  },
+  ctx: Pick<
+    ObjectDiffContext,
+    "version" | "currentUser" | "defaultPrivilegeState"
+  >,
   main: Record<string, Range>,
   branch: Record<string, Range>,
 ): RangeChange[] {
@@ -73,6 +70,10 @@ export function diffRanges(
       "range",
       createdRange.schema ?? "",
     );
+    const creatorFilteredDefaults =
+      createdRange.owner !== ctx.currentUser
+        ? effectiveDefaults.filter((p) => p.grantee !== ctx.currentUser)
+        : effectiveDefaults;
     // Filter out PUBLIC's built-in default USAGE privilege (PostgreSQL grants it automatically)
     // Reference: https://www.postgresql.org/docs/17/ddl-priv.html Table 5.2
     // This prevents generating unnecessary "GRANT USAGE TO PUBLIC" statements
@@ -83,56 +84,25 @@ export function diffRanges(
     // Filter out owner privileges - owner always has ALL privileges implicitly
     // and shouldn't be compared. Use the range owner as the reference.
     const privilegeResults = diffPrivileges(
-      effectiveDefaults,
+      filterPublicBuiltInDefaults("range", creatorFilteredDefaults),
       desiredPrivileges,
       createdRange.owner,
     );
 
-    // Generate grant changes
-    for (const [grantee, result] of privilegeResults) {
-      if (result.grants.length > 0) {
-        const grantGroups = groupPrivilegesByGrantable(result.grants);
-        for (const [grantable, list] of grantGroups) {
-          void grantable;
-          changes.push(
-            new GrantRangePrivileges({
-              range: createdRange,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke changes
-      if (result.revokes.length > 0) {
-        const revokeGroups = groupPrivilegesByGrantable(result.revokes);
-        for (const [grantable, list] of revokeGroups) {
-          void grantable;
-          changes.push(
-            new RevokeRangePrivileges({
-              range: createdRange,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke grant option changes
-      if (result.revokeGrantOption.length > 0) {
-        changes.push(
-          new RevokeGrantOptionRangePrivileges({
-            range: createdRange,
-            grantee,
-            privilegeNames: result.revokeGrantOption,
-            version: ctx.version,
-          }),
-        );
-      }
-    }
+    changes.push(
+      ...(emitObjectPrivilegeChanges(
+        privilegeResults,
+        createdRange,
+        createdRange,
+        "range",
+        {
+          Grant: GrantRangePrivileges,
+          Revoke: RevokeRangePrivileges,
+          RevokeGrantOption: RevokeGrantOptionRangePrivileges,
+        },
+        ctx.version,
+      ) as RangeChange[]),
+    );
   }
 
   for (const id of dropped) {
@@ -204,54 +174,22 @@ export function diffRanges(
         mainPrivilegesFiltered,
         branchPrivilegesFiltered,
         branchRange.owner,
-        ctx.mainRoles,
       );
 
-      for (const [grantee, result] of privilegeResults) {
-        // Generate grant changes
-        if (result.grants.length > 0) {
-          const grantGroups = groupPrivilegesByGrantable(result.grants);
-          for (const [grantable, list] of grantGroups) {
-            void grantable;
-            changes.push(
-              new GrantRangePrivileges({
-                range: branchRange,
-                grantee,
-                privileges: list,
-                version: ctx.version,
-              }),
-            );
-          }
-        }
-
-        // Generate revoke changes
-        if (result.revokes.length > 0) {
-          const revokeGroups = groupPrivilegesByGrantable(result.revokes);
-          for (const [grantable, list] of revokeGroups) {
-            void grantable;
-            changes.push(
-              new RevokeRangePrivileges({
-                range: mainRange,
-                grantee,
-                privileges: list,
-                version: ctx.version,
-              }),
-            );
-          }
-        }
-
-        // Generate revoke grant option changes
-        if (result.revokeGrantOption.length > 0) {
-          changes.push(
-            new RevokeGrantOptionRangePrivileges({
-              range: mainRange,
-              grantee,
-              privilegeNames: result.revokeGrantOption,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
+      changes.push(
+        ...(emitObjectPrivilegeChanges(
+          privilegeResults,
+          branchRange,
+          mainRange,
+          "range",
+          {
+            Grant: GrantRangePrivileges,
+            Revoke: RevokeRangePrivileges,
+            RevokeGrantOption: RevokeGrantOptionRangePrivileges,
+          },
+          ctx.version,
+        ) as RangeChange[]),
+      );
     }
   }
 

@@ -23,6 +23,30 @@ type ExtractedProperties = {
   schema?: string | string[];
   owner?: string | string[];
   member?: string | string[];
+  grantee?: string | string[];
+  publication?: string | string[];
+  extension?: string | string[];
+  procedureLanguage?: string | string[];
+  eventTriggerName?: string | string[];
+  procedureBinaryPath?: string | string[];
+  triggerFunctionSchema?: string | string[];
+};
+
+/**
+ * Special properties that use custom matching logic (not extractor-based).
+ */
+type SpecialProperties = {
+  /**
+   * Prefix match on `change.requires`.
+   * Matches when any element of `change.requires` starts with any of the given prefixes.
+   * Useful for excluding changes that depend on specific schemas/types.
+   *
+   * @example Filter out changes that require auth or extensions types:
+   * ```ts
+   * { not: { requiresMatching: ["type:auth.", "type:extensions."] } }
+   * ```
+   */
+  requiresMatching?: string[];
 };
 
 /**
@@ -30,7 +54,13 @@ type ExtractedProperties = {
  * Multiple properties are combined with AND (all must match).
  */
 type PropertyPattern = CoreProperties &
-  ExtractedProperties & {
+  ExtractedProperties &
+  SpecialProperties & {
+    /**
+     * When true, exclusions from this filter cascade to dependents (requires/pg_depend).
+     * Default false for DSL filters (opt-in).
+     */
+    cascade?: boolean;
     // Composition operators are NOT allowed in property patterns
     and?: never;
     or?: never;
@@ -44,30 +74,39 @@ type PropertyPattern = CoreProperties &
 type CompositionPattern =
   | ({
       and: FilterPattern[];
+      cascade?: boolean;
       or?: never;
       not?: never;
     } & {
       [K in keyof CoreProperties]?: never;
     } & {
       [K in keyof ExtractedProperties]?: never;
+    } & {
+      [K in keyof SpecialProperties]?: never;
     })
   | ({
       or: FilterPattern[];
+      cascade?: boolean;
       and?: never;
       not?: never;
     } & {
       [K in keyof CoreProperties]?: never;
     } & {
       [K in keyof ExtractedProperties]?: never;
+    } & {
+      [K in keyof SpecialProperties]?: never;
     })
   | ({
       not: FilterPattern;
+      cascade?: boolean;
       and?: never;
       or?: never;
     } & {
       [K in keyof CoreProperties]?: never;
     } & {
       [K in keyof ExtractedProperties]?: never;
+    } & {
+      [K in keyof SpecialProperties]?: never;
     });
 
 /**
@@ -135,10 +174,33 @@ export function evaluatePattern(
     }
   }
 
+  // Match requiresMatching (special property - prefix match on change.requires)
+  if (pattern.requiresMatching) {
+    const requires = change.requires ?? [];
+    const prefixes = pattern.requiresMatching;
+    const hasMatch = requires.some((r) =>
+      prefixes.some((p) => r.startsWith(p)),
+    );
+    if (!hasMatch) {
+      return false;
+    }
+  }
+
   // Match extracted properties
   for (const [key, value] of Object.entries(pattern)) {
-    // Skip composition operators and core properties
-    if (["and", "or", "not", "type", "operation", "scope"].includes(key)) {
+    // Skip composition operators, core properties, special properties, and cascade
+    if (
+      [
+        "and",
+        "or",
+        "not",
+        "type",
+        "operation",
+        "scope",
+        "requiresMatching",
+        "cascade",
+      ].includes(key)
+    ) {
       continue;
     }
 

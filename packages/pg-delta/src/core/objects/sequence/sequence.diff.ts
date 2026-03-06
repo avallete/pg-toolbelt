@@ -1,10 +1,9 @@
-import type { DefaultPrivilegeState } from "../base.default-privileges.ts";
 import { diffObjects } from "../base.diff.ts";
 import {
   diffPrivileges,
-  groupPrivilegesByGrantable,
+  emitObjectPrivilegeChanges,
 } from "../base.privilege-diff.ts";
-import type { Role } from "../role/role.model.ts";
+import type { ObjectDiffContext } from "../diff-context.ts";
 import type { Table } from "../table/table.model.ts";
 import { hasNonAlterableChanges } from "../utils.ts";
 import {
@@ -35,12 +34,10 @@ import type { Sequence } from "./sequence.model.ts";
  * @returns A list of changes to apply to main to make it match branch.
  */
 export function diffSequences(
-  ctx: {
-    version: number;
-    currentUser: string;
-    defaultPrivilegeState: DefaultPrivilegeState;
-    mainRoles: Record<string, Role>;
-  },
+  ctx: Pick<
+    ObjectDiffContext,
+    "version" | "currentUser" | "defaultPrivilegeState"
+  >,
   main: Record<string, Sequence>,
   branch: Record<string, Sequence>,
   branchTables: Record<string, Table> = {},
@@ -83,62 +80,33 @@ export function diffSequences(
       "sequence",
       createdSeq.schema ?? "",
     );
+    const creatorFilteredDefaults =
+      createdSeq.owner !== ctx.currentUser
+        ? effectiveDefaults.filter((p) => p.grantee !== ctx.currentUser)
+        : effectiveDefaults;
     const desiredPrivileges = createdSeq.privileges;
     // Filter out owner privileges - owner always has ALL privileges implicitly
     // and shouldn't be compared. Use the sequence owner as the reference.
-    // Superuser privileges are filtered inside diffPrivileges.
     const privilegeResults = diffPrivileges(
-      effectiveDefaults,
+      creatorFilteredDefaults,
       desiredPrivileges,
       createdSeq.owner,
-      ctx.mainRoles,
     );
 
-    // Generate grant changes
-    for (const [grantee, result] of privilegeResults) {
-      if (result.grants.length > 0) {
-        const grantGroups = groupPrivilegesByGrantable(result.grants);
-        for (const [grantable, list] of grantGroups) {
-          void grantable;
-          changes.push(
-            new GrantSequencePrivileges({
-              sequence: createdSeq,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke changes
-      if (result.revokes.length > 0) {
-        const revokeGroups = groupPrivilegesByGrantable(result.revokes);
-        for (const [grantable, list] of revokeGroups) {
-          void grantable;
-          changes.push(
-            new RevokeSequencePrivileges({
-              sequence: createdSeq,
-              grantee,
-              privileges: list,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
-
-      // Generate revoke grant option changes
-      if (result.revokeGrantOption.length > 0) {
-        changes.push(
-          new RevokeGrantOptionSequencePrivileges({
-            sequence: createdSeq,
-            grantee,
-            privilegeNames: result.revokeGrantOption,
-            version: ctx.version,
-          }),
-        );
-      }
-    }
+    changes.push(
+      ...(emitObjectPrivilegeChanges(
+        privilegeResults,
+        createdSeq,
+        createdSeq,
+        "sequence",
+        {
+          Grant: GrantSequencePrivileges,
+          Revoke: RevokeSequencePrivileges,
+          RevokeGrantOption: RevokeGrantOptionSequencePrivileges,
+        },
+        ctx.version,
+      ) as SequenceChange[]),
+    );
   }
 
   for (const sequenceId of dropped) {
@@ -295,59 +263,26 @@ export function diffSequences(
       // PRIVILEGES
       // Filter out owner privileges - owner always has ALL privileges implicitly
       // and shouldn't be compared. Use branch owner as the reference.
-      // Superuser privileges are filtered inside diffPrivileges.
       const privilegeResults = diffPrivileges(
         mainSequence.privileges,
         branchSequence.privileges,
         branchSequence.owner,
-        ctx.mainRoles,
       );
 
-      for (const [grantee, result] of privilegeResults) {
-        // Generate grant changes
-        if (result.grants.length > 0) {
-          const grantGroups = groupPrivilegesByGrantable(result.grants);
-          for (const [grantable, list] of grantGroups) {
-            void grantable;
-            changes.push(
-              new GrantSequencePrivileges({
-                sequence: branchSequence,
-                grantee,
-                privileges: list,
-                version: ctx.version,
-              }),
-            );
-          }
-        }
-
-        // Generate revoke changes
-        if (result.revokes.length > 0) {
-          const revokeGroups = groupPrivilegesByGrantable(result.revokes);
-          for (const [grantable, list] of revokeGroups) {
-            void grantable;
-            changes.push(
-              new RevokeSequencePrivileges({
-                sequence: mainSequence,
-                grantee,
-                privileges: list,
-                version: ctx.version,
-              }),
-            );
-          }
-        }
-
-        // Generate revoke grant option changes
-        if (result.revokeGrantOption.length > 0) {
-          changes.push(
-            new RevokeGrantOptionSequencePrivileges({
-              sequence: mainSequence,
-              grantee,
-              privilegeNames: result.revokeGrantOption,
-              version: ctx.version,
-            }),
-          );
-        }
-      }
+      changes.push(
+        ...(emitObjectPrivilegeChanges(
+          privilegeResults,
+          branchSequence,
+          mainSequence,
+          "sequence",
+          {
+            Grant: GrantSequencePrivileges,
+            Revoke: RevokeSequencePrivileges,
+            RevokeGrantOption: RevokeGrantOptionSequencePrivileges,
+          },
+          ctx.version,
+        ) as SequenceChange[]),
+      );
 
       // Note: Sequence renaming would also use ALTER SEQUENCE ... RENAME TO ...
       // But since our Sequence model uses 'name' as the identity field,

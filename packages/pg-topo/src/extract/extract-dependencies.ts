@@ -900,9 +900,21 @@ const extractDependencyRefs = (
       const nameParts = extractNameParts(createDomain?.domainname);
       const domainRef = objectFromNameParts("domain", nameParts);
       const typeRef = typeFromTypeNameNode(createDomain?.typeName);
+      const requires: ObjectRef[] = typeRef ? [typeRef] : [];
+
+      const constraints = Array.isArray(createDomain?.constraints)
+        ? createDomain.constraints
+        : [];
+      for (const constraintItem of constraints) {
+        const constraint = asRecord(asRecord(constraintItem)?.Constraint);
+        if (constraint?.raw_expr) {
+          addExpressionDependencies(constraint.raw_expr, requires);
+        }
+      }
+
       return {
         provides: domainRef ? [domainRef] : [],
-        requires: typeRef ? [typeRef] : [],
+        requires,
       };
     }
     case "CREATE_SEQUENCE": {
@@ -1071,6 +1083,36 @@ const extractDependencyRefs = (
   }
 };
 
+// When a pg-topo:requires annotation specifies a concrete signature for an
+// object, any body-extracted requirement for the same kind:schema:name with an
+// ambiguous (unknown-containing) signature is redundant. Keeping both would
+// cause the ambiguous ref to trigger false-positive matching in the graph
+// builder (e.g. cycle detection on overloaded functions). This filter removes
+// the extracted refs that the annotations supersede.
+const filterSupersededRequires = (
+  extractedRequires: ObjectRef[],
+  annotationRequires: ObjectRef[],
+): ObjectRef[] => {
+  if (annotationRequires.length === 0) {
+    return extractedRequires;
+  }
+  const annotatedBaseKeys = new Set(
+    annotationRequires
+      .filter((ref) => ref.signature && !ref.signature.includes("unknown"))
+      .map((ref) => `${ref.kind}:${ref.schema ?? ""}:${ref.name}`),
+  );
+  if (annotatedBaseKeys.size === 0) {
+    return extractedRequires;
+  }
+  return extractedRequires.filter((ref) => {
+    if (!ref.signature?.includes("unknown")) {
+      return true;
+    }
+    const baseKey = `${ref.kind}:${ref.schema ?? ""}:${ref.name}`;
+    return !annotatedBaseKeys.has(baseKey);
+  });
+};
+
 export const extractDependencies = (
   statementClass: StatementClass,
   ast: unknown,
@@ -1083,7 +1125,7 @@ export const extractDependencies = (
       ...annotations.provides,
     ]),
     requires: dedupeObjectRefs([
-      ...extracted.requires,
+      ...filterSupersededRequires(extracted.requires, annotations.requires),
       ...annotations.requires,
       ...annotations.dependsOn,
     ]),

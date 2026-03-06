@@ -37,10 +37,55 @@ import { diffRanges } from "./objects/type/range/range.diff.ts";
 import { stringifyWithBigInt } from "./objects/utils.ts";
 import { diffViews } from "./objects/view/view.diff.ts";
 
+type PrivilegeChange = Extract<Change, { scope: "privilege" }>;
+
+/**
+ * Get the stableId of the target object for a privilege change.
+ * Used to filter out redundant REVOKE statements for dropped objects.
+ */
+function getPrivilegeTargetStableId(change: PrivilegeChange): string {
+  switch (change.objectType) {
+    case "composite_type":
+      return change.compositeType.stableId;
+    case "domain":
+      return change.domain.stableId;
+    case "enum":
+      return change.enum.stableId;
+    case "language":
+      return change.language.stableId;
+    case "materialized_view":
+      return change.materializedView.stableId;
+    case "aggregate":
+      return change.aggregate.stableId;
+    case "procedure":
+      return change.procedure.stableId;
+    case "range":
+      return change.range.stableId;
+    case "schema":
+      return change.schema.stableId;
+    case "sequence":
+      return change.sequence.stableId;
+    case "table":
+      return change.table.stableId;
+    case "view":
+      return change.view.stableId;
+    case "foreign_data_wrapper":
+      return change.foreignDataWrapper.stableId;
+    case "server":
+      return change.server.stableId;
+    case "foreign_table":
+      return change.foreignTable.stableId;
+    default: {
+      const _exhaustive: never = change;
+      return _exhaustive;
+    }
+  }
+}
+
 export function diffCatalogs(
   main: Catalog,
   branch: Catalog,
-  options?: { role?: string },
+  options?: { role?: string; skipDefaultPrivilegeSubtraction?: boolean },
 ) {
   const changes: Change[] = [];
 
@@ -56,24 +101,33 @@ export function diffCatalogs(
   // This represents what defaults will be in effect after all ALTER DEFAULT PRIVILEGES
   // Since ALTER DEFAULT PRIVILEGES runs before CREATE (via constraint spec),
   // all created objects will use these final defaults.
-  const defaultPrivilegeState = new DefaultPrivilegeState(main.roles);
-  for (const change of roleChanges) {
-    if (change instanceof GrantRoleDefaultPrivileges) {
-      defaultPrivilegeState.applyGrant(
-        change.role.name,
-        change.objtype,
-        change.inSchema,
-        change.grantee,
-        change.privileges,
-      );
-    } else if (change instanceof RevokeRoleDefaultPrivileges) {
-      defaultPrivilegeState.applyRevoke(
-        change.role.name,
-        change.objtype,
-        change.inSchema,
-        change.grantee,
-        change.privileges,
-      );
+  //
+  // When skipDefaultPrivilegeSubtraction is true, we use an empty state so that
+  // getEffectiveDefaults always returns [] -- no privileges are subtracted and
+  // every GRANT is emitted explicitly.  This is needed for declarative export
+  // where the output must be self-contained regardless of statement execution order.
+  const defaultPrivilegeState = options?.skipDefaultPrivilegeSubtraction
+    ? new DefaultPrivilegeState({})
+    : new DefaultPrivilegeState(main.roles);
+  if (!options?.skipDefaultPrivilegeSubtraction) {
+    for (const change of roleChanges) {
+      if (change instanceof GrantRoleDefaultPrivileges) {
+        defaultPrivilegeState.applyGrant(
+          change.role.name,
+          change.objtype,
+          change.inSchema,
+          change.grantee,
+          change.privileges,
+        );
+      } else if (change instanceof RevokeRoleDefaultPrivileges) {
+        defaultPrivilegeState.applyRevoke(
+          change.role.name,
+          change.objtype,
+          change.inSchema,
+          change.grantee,
+          change.privileges,
+        );
+      }
     }
   }
 
@@ -88,6 +142,7 @@ export function diffCatalogs(
     currentUser: effectiveUser,
     defaultPrivilegeState,
     mainRoles: main.roles,
+    skipDefaultPrivilegeSubtraction: options?.skipDefaultPrivilegeSubtraction,
   };
 
   // Step 4: Diff all other objects with default privileges context
@@ -95,11 +150,7 @@ export function diffCatalogs(
     ...diffAggregates(diffContext, main.aggregates, branch.aggregates),
   );
   changes.push(
-    ...diffCollations(
-      { currentUser: effectiveUser },
-      main.collations,
-      branch.collations,
-    ),
+    ...diffCollations(diffContext, main.collations, branch.collations),
   );
   changes.push(
     ...diffCompositeTypes(
@@ -122,18 +173,10 @@ export function diffCatalogs(
     ),
   );
   changes.push(
-    ...diffSubscriptions(
-      { currentUser: effectiveUser },
-      main.subscriptions,
-      branch.subscriptions,
-    ),
+    ...diffSubscriptions(diffContext, main.subscriptions, branch.subscriptions),
   );
   changes.push(
-    ...diffPublications(
-      { currentUser: effectiveUser },
-      main.publications,
-      branch.publications,
-    ),
+    ...diffPublications(diffContext, main.publications, branch.publications),
   );
   changes.push(
     ...diffProcedures(diffContext, main.procedures, branch.procedures),
@@ -153,11 +196,7 @@ export function diffCatalogs(
     ...diffTriggers(main.triggers, branch.triggers, branch.indexableObjects),
   );
   changes.push(
-    ...diffEventTriggers(
-      { currentUser: effectiveUser },
-      main.eventTriggers,
-      branch.eventTriggers,
-    ),
+    ...diffEventTriggers(diffContext, main.eventTriggers, branch.eventTriggers),
   );
   changes.push(...diffRules(main.rules, branch.rules));
   changes.push(...diffRanges(diffContext, main.ranges, branch.ranges));
@@ -188,45 +227,7 @@ export function diffCatalogs(
   }
   let filteredChanges = changes.filter((change) => {
     if (change.operation === "alter" && change.scope === "privilege") {
-      switch (change.objectType) {
-        case "composite_type":
-          return !droppedObjectStableIds.has(change.compositeType.stableId);
-        case "domain":
-          return !droppedObjectStableIds.has(change.domain.stableId);
-        case "enum":
-          return !droppedObjectStableIds.has(change.enum.stableId);
-        case "language":
-          return !droppedObjectStableIds.has(change.language.stableId);
-        case "materialized_view":
-          return !droppedObjectStableIds.has(change.materializedView.stableId);
-        case "aggregate":
-          return !droppedObjectStableIds.has(change.aggregate.stableId);
-        case "procedure":
-          return !droppedObjectStableIds.has(change.procedure.stableId);
-        case "range":
-          return !droppedObjectStableIds.has(change.range.stableId);
-        case "schema":
-          return !droppedObjectStableIds.has(change.schema.stableId);
-        case "sequence":
-          return !droppedObjectStableIds.has(change.sequence.stableId);
-        case "table":
-          return !droppedObjectStableIds.has(change.table.stableId);
-        case "view":
-          return !droppedObjectStableIds.has(change.view.stableId);
-        case "foreign_data_wrapper":
-          return !droppedObjectStableIds.has(
-            change.foreignDataWrapper.stableId,
-          );
-        case "server":
-          return !droppedObjectStableIds.has(change.server.stableId);
-        case "foreign_table":
-          return !droppedObjectStableIds.has(change.foreignTable.stableId);
-        default: {
-          // exhaustiveness check
-          const _exhaustive: never = change;
-          return _exhaustive;
-        }
-      }
+      return !droppedObjectStableIds.has(getPrivilegeTargetStableId(change));
     }
     return true;
   });

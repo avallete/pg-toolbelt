@@ -513,28 +513,36 @@ describe("sql formatting snapshots", () => {
         IN "p_table_name_for_metrics" text, IN "p_limit_count_default" integer);
 
       -- function.alter.change_owner
-      ALTER FUNCTION public.calculate_metrics_for_analytics_dashboard_with_extended_name OWNER TO
+      ALTER FUNCTION
+        public.calculate_metrics_for_analytics_dashboard_with_extended_name(text, text, integer) OWNER TO
         new_admin;
 
       -- function.alter.set_security
-      ALTER FUNCTION public.calculate_metrics_for_analytics_dashboard_with_extended_name SECURITY INVOKER;
+      ALTER FUNCTION
+        public.calculate_metrics_for_analytics_dashboard_with_extended_name(text, text, integer) SECURITY
+        INVOKER;
 
       -- function.alter.set_config
-      ALTER FUNCTION public.calculate_metrics_for_analytics_dashboard_with_extended_name
+      ALTER FUNCTION
+        public.calculate_metrics_for_analytics_dashboard_with_extended_name(text, text, integer)
         SET work_mem TO '256MB';
 
       -- function.alter.set_volatility
-      ALTER FUNCTION public.calculate_metrics_for_analytics_dashboard_with_extended_name IMMUTABLE;
+      ALTER FUNCTION
+        public.calculate_metrics_for_analytics_dashboard_with_extended_name(text, text, integer) IMMUTABLE;
 
       -- function.alter.set_strictness
-      ALTER FUNCTION public.calculate_metrics_for_analytics_dashboard_with_extended_name CALLED
+      ALTER FUNCTION
+        public.calculate_metrics_for_analytics_dashboard_with_extended_name(text, text, integer) CALLED
         ON NULL INPUT;
 
       -- function.alter.set_leakproof
-      ALTER FUNCTION public.calculate_metrics_for_analytics_dashboard_with_extended_name LEAKPROOF;
+      ALTER FUNCTION
+        public.calculate_metrics_for_analytics_dashboard_with_extended_name(text, text, integer) LEAKPROOF;
 
       -- function.alter.set_parallel
-      ALTER FUNCTION public.calculate_metrics_for_analytics_dashboard_with_extended_name PARALLEL
+      ALTER FUNCTION
+        public.calculate_metrics_for_analytics_dashboard_with_extended_name(text, text, integer) PARALLEL
         RESTRICTED;
 
       -- function.comment
@@ -979,13 +987,13 @@ describe("sql formatting snapshots", () => {
       COMMENT ON FOREIGN TABLE public.remote_users IS NULL;
 
       -- foreign_table.grant
-      GRANT SELECT ON FOREIGN TABLE public.remote_users TO app_reader;
+      GRANT SELECT ON TABLE public.remote_users TO app_reader;
 
       -- foreign_table.revoke
-      REVOKE SELECT ON FOREIGN TABLE public.remote_users FROM app_reader;
+      REVOKE SELECT ON TABLE public.remote_users FROM app_reader;
 
       -- foreign_table.revoke_grant_option
-      REVOKE GRANT OPTION FOR SELECT ON FOREIGN TABLE public.remote_users FROM app_reader;
+      REVOKE GRANT OPTION FOR SELECT ON TABLE public.remote_users FROM app_reader;
 
       -- server.create
       CREATE SERVER remote_server

@@ -3,7 +3,8 @@
  */
 
 import type { PoolClient, PoolConfig } from "pg";
-import { Pool, types } from "pg";
+import { escapeIdentifier, Pool, types } from "pg";
+import { parseSslConfig } from "./plan/ssl-config.ts";
 
 // ============================================================================
 // Array Parser
@@ -103,6 +104,12 @@ types.setTypeParser(1007, (val: string) => parseArray(val, parseIntElement)); //
 // @ts-expect-error - pg types expects TypeId but raw OID numbers work fine
 types.setTypeParser(1016, (val: string) => parseArray(val, parseIntElement)); // int8[]
 
+const DEFAULT_POOL_MAX = Number(process.env.PGDELTA_POOL_MAX) || 5;
+const DEFAULT_CONNECTION_TIMEOUT_MS =
+  Number(process.env.PGDELTA_CONNECTION_TIMEOUT_MS) || 3_000;
+const DEFAULT_CONNECT_TIMEOUT_MS =
+  Number(process.env.PGDELTA_CONNECT_TIMEOUT_MS) || 2_500;
+
 /**
  * Options for creating a Pool with event listeners.
  */
@@ -125,7 +132,12 @@ export function createPool(
   options?: CreatePoolOptions,
 ): Pool {
   const { onConnect, onError, onAcquire, onRemove, ...config } = options ?? {};
-  const pool = new Pool({ connectionString, ...config });
+  const pool = new Pool({
+    connectionString,
+    max: DEFAULT_POOL_MAX,
+    connectionTimeoutMillis: DEFAULT_CONNECTION_TIMEOUT_MS,
+    ...config,
+  });
 
   if (onConnect) pool.on("connect", onConnect);
   if (onError) pool.on("error", onError);
@@ -149,6 +161,63 @@ export function createPool(
  * inside each `client.end()` callback — ensuring all sockets are
  * truly closed before it resolves.
  */
+/**
+ * Create a pool from a connection URL with standard session setup:
+ * SSL parsing, search_path isolation, optional SET ROLE, and 57P01 suppression.
+ *
+ * Returns the pool and a `close` function that properly waits for all sockets
+ * to close (via {@link endPool}).
+ */
+export async function createManagedPool(
+  url: string,
+  options?: { role?: string; label?: "source" | "target" },
+): Promise<{ pool: Pool; close: () => Promise<void> }> {
+  const sslConfig = await parseSslConfig(url, options?.label ?? "target");
+  const pool = createPool(sslConfig.cleanedUrl, {
+    ...(sslConfig.ssl !== undefined ? { ssl: sslConfig.ssl } : {}),
+    onError: (err: Error & { code?: string }) => {
+      if (err.code !== "57P01") {
+        console.error("Pool error:", err);
+      }
+    },
+    onConnect: async (client) => {
+      await client.query("SET search_path = ''");
+      if (options?.role) {
+        await client.query(`SET ROLE ${escapeIdentifier(options.role)}`);
+      }
+    },
+  });
+
+  // Eagerly validate connectivity so SSL/auth failures surface immediately
+  // instead of hanging on the first real query. node-pg's connectionTimeoutMillis
+  // is not reliably enforced under Bun when SSL negotiation hangs.
+  const label = options?.label ?? "target";
+  const timeoutMs = DEFAULT_CONNECT_TIMEOUT_MS;
+  try {
+    const client = await Promise.race([
+      pool.connect(),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Connection to ${label} database timed out after ${timeoutMs}ms. ` +
+                  `The server may require SSL, use an invalid certificate, or be unreachable.`,
+              ),
+            ),
+          timeoutMs,
+        ),
+      ),
+    ]);
+    client.release();
+  } catch (err) {
+    await pool.end().catch(() => {});
+    throw err;
+  }
+
+  return { pool, close: () => endPool(pool) };
+}
+
 export function endPool(pool: Pool): Promise<void> {
   const clientCount = pool.totalCount;
 

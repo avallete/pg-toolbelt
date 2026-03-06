@@ -147,4 +147,38 @@ describe.concurrent("table.create", () => {
     const change = new CreateTable({ table: t });
     expect(change.serialize()).toBe("CREATE UNLOGGED TABLE public.t ()");
   });
+
+  test("requires does NOT include procedure stableIds from DEFAULT expressions (handled by pg_depend catalog constraints)", () => {
+    // Function dependencies in DEFAULT expressions are resolved through pg_depend
+    // in the sort pipeline, which provides exact argument types and covers all
+    // expression contexts. The CreateTable change itself does not need to list them.
+    const t = new Table({
+      ...base,
+      columns: [
+        {
+          name: "auth_role",
+          position: 1,
+          data_type: "text",
+          data_type_str: "text",
+          is_custom_type: false,
+          custom_type_type: null,
+          custom_type_category: null,
+          custom_type_schema: null,
+          custom_type_name: null,
+          not_null: false,
+          is_identity: false,
+          is_identity_always: false,
+          is_generated: false,
+          collation: null,
+          default: "auth.role()",
+          comment: null,
+        },
+      ],
+    });
+    const change = new CreateTable({ table: t });
+    const procedureRequires = change.requires.filter((r) =>
+      r.startsWith("procedure:"),
+    );
+    expect(procedureRequires).toEqual([]);
+  });
 });
