@@ -9,7 +9,6 @@ import {
   getPgDeltaLogger,
 } from "../../core/logging.ts";
 import { rootCommand } from "../app.ts";
-import type { CliExitError } from "../errors.ts";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../../../package.json") as { version: string };
@@ -26,11 +25,20 @@ const cli = Command.run(rootCommand, {
 });
 
 cli(process.argv).pipe(
-  Effect.catchTag("CliExitError", (err: CliExitError) =>
-    Effect.sync(() => {
-      process.exitCode = err.exitCode;
-    }),
-  ),
+  Effect.catchTags({
+    CliExitError: (err) =>
+      Effect.sync(() => {
+        process.exitCode = err.exitCode;
+      }),
+    ChangesDetected: () =>
+      Effect.sync(() => {
+        process.exitCode = 2;
+      }),
+    UserCancelled: () =>
+      Effect.sync(() => {
+        process.exitCode = 2;
+      }),
+  }),
   Effect.tapErrorCause((cause) =>
     Effect.sync(() => {
       const error = cause.toJSON();

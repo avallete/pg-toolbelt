@@ -60,7 +60,8 @@ export const applyCommand = Command.make(
         return yield* Effect.fail(
           new CliExitError({
             exitCode: validation.exitCode ?? 1,
-            message: "",
+            message:
+              "Plan blocked: unsafe operations require the --unsafe flag",
           }),
         );
       }
@@ -73,7 +74,9 @@ export const applyCommand = Command.make(
 
       const { exitCode } = handleApplyResult(result);
       if (exitCode !== 0) {
-        return yield* Effect.fail(new CliExitError({ exitCode, message: "" }));
+        return yield* Effect.fail(
+          new CliExitError({ exitCode, message: "Plan apply failed" }),
+        );
       }
     }),
 );

@@ -12,7 +12,7 @@ import type { SerializeDSL } from "../../core/integrations/serialize/dsl.ts";
 import type { ChangeSerializer } from "../../core/integrations/serialize/serialize.types.ts";
 import { createPlan } from "../../core/plan/index.ts";
 import type { SqlFormatOptions } from "../../core/plan/sql-format.ts";
-import { CliExitError } from "../errors.ts";
+import { ChangesDetected } from "../errors.ts";
 import { logInfo } from "../ui.ts";
 import { loadIntegrationDSL } from "../utils/integrations.ts";
 import { isPostgresUrl, loadCatalogFromFile } from "../utils/resolve-input.ts";
@@ -206,6 +206,8 @@ export const planCommand = Command.make(
         logInfo(content.endsWith("\n") ? content.trimEnd() : content);
       }
 
-      return yield* Effect.fail(new CliExitError({ exitCode: 2, message: "" }));
+      return yield* Effect.fail(
+        new ChangesDetected({ message: "Changes detected" }),
+      );
     }),
 );

@@ -104,11 +104,10 @@ export const declarativeApplyCommand = Command.make(
       }).pipe(Effect.tapError((e) => Effect.sync(() => logError(e.message))));
 
       if (content.length === 0) {
-        logError(
-          `No .sql files found in '${args.path}'. Pass a directory containing .sql files or a single .sql file.`,
-        );
+        const msg = `No .sql files found in '${args.path}'. Pass a directory containing .sql files or a single .sql file.`;
+        logError(msg);
         return yield* Effect.fail(
-          new CliExitError({ exitCode: 1, message: "" }),
+          new CliExitError({ exitCode: 1, message: msg }),
         );
       }
 
@@ -282,7 +281,10 @@ export const declarativeApplyCommand = Command.make(
             }
             logWarning(errorLines.join("\n"));
             return yield* Effect.fail(
-              new CliExitError({ exitCode: 1, message: "" }),
+              new CliExitError({
+                exitCode: 1,
+                message: `${apply.validationErrors.length} function body validation error(s)`,
+              }),
             );
           }
           break;
@@ -315,7 +317,10 @@ export const declarativeApplyCommand = Command.make(
           }
           logError(errorLines.join("\n"));
           return yield* Effect.fail(
-            new CliExitError({ exitCode: 2, message: "" }),
+            new CliExitError({
+              exitCode: 2,
+              message: `Stuck after ${apply.totalRounds} round(s) with ${apply.stuckStatements?.length ?? 0} unresolvable statement(s)`,
+            }),
           );
         }
 
@@ -346,7 +351,10 @@ export const declarativeApplyCommand = Command.make(
           }
           logError(errorLines.join("\n"));
           return yield* Effect.fail(
-            new CliExitError({ exitCode: 1, message: "" }),
+            new CliExitError({
+              exitCode: 1,
+              message: `Declarative apply completed with ${apply.errors?.length ?? 0} error(s)`,
+            }),
           );
         }
       }

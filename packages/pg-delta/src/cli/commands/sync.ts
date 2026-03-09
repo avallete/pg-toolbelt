@@ -10,7 +10,7 @@ import type { SerializeDSL } from "../../core/integrations/serialize/dsl.ts";
 import type { ChangeSerializer } from "../../core/integrations/serialize/serialize.types.ts";
 import { applyPlan } from "../../core/plan/apply.ts";
 import { createPlan } from "../../core/plan/index.ts";
-import { CliExitError } from "../errors.ts";
+import { CliExitError, UserCancelled } from "../errors.ts";
 import { logInfo } from "../ui.ts";
 import { loadIntegrationDSL } from "../utils/integrations.ts";
 import {
@@ -126,7 +126,8 @@ export const syncCommand = Command.make(
         return yield* Effect.fail(
           new CliExitError({
             exitCode: validation.exitCode ?? 1,
-            message: "",
+            message:
+              "Plan blocked: unsafe operations require the --unsafe flag",
           }),
         );
       }
@@ -138,7 +139,7 @@ export const syncCommand = Command.make(
         );
         if (!confirmed) {
           return yield* Effect.fail(
-            new CliExitError({ exitCode: 2, message: "" }),
+            new UserCancelled({ message: "Operation cancelled by user" }),
           );
         }
       }
@@ -153,7 +154,9 @@ export const syncCommand = Command.make(
       // 6. Handle apply result
       const { exitCode } = handleApplyResult(result);
       if (exitCode !== 0) {
-        return yield* Effect.fail(new CliExitError({ exitCode, message: "" }));
+        return yield* Effect.fail(
+          new CliExitError({ exitCode, message: "Plan apply failed" }),
+        );
       }
     }),
 );
