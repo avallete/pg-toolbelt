@@ -5,12 +5,14 @@ import type { DatabaseApi } from "./database.ts";
 
 describe("DatabaseApi mock", () => {
   test("can mock query responses", async () => {
-    const MockDb: DatabaseApi = {
-      query: (_sql) => Effect.succeed({ rows: [{ count: 42 }], rowCount: 1 }),
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const MockDb = {
+      query: (_sql: string) =>
+        Effect.succeed({ rows: [{ count: 42 }], rowCount: 1 }),
       getPool: () => {
         throw new Error("no pool in mock");
       },
-    };
+    } as any as DatabaseApi;
 
     const result = await MockDb.query<{ count: number }>("SELECT 42").pipe(
       Effect.runPromise,
@@ -19,13 +21,14 @@ describe("DatabaseApi mock", () => {
   });
 
   test("query failure produces CatalogExtractionError", async () => {
-    const FailingDb: DatabaseApi = {
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const FailingDb = {
       query: () =>
         Effect.fail(new CatalogExtractionError({ message: "boom" })),
       getPool: () => {
         throw new Error("no pool");
       },
-    };
+    } as any as DatabaseApi;
 
     const result = await FailingDb.query("SELECT 1").pipe(
       Effect.either,
@@ -39,8 +42,9 @@ describe("DatabaseApi mock", () => {
   });
 
   test("mock with parameterized queries", async () => {
-    const MockDb: DatabaseApi = {
-      query: (_sql, values) =>
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const MockDb = {
+      query: (_sql: string, values?: unknown[]) =>
         Effect.succeed({
           rows: [{ id: values?.[0] ?? 1 }],
           rowCount: 1,
@@ -48,7 +52,7 @@ describe("DatabaseApi mock", () => {
       getPool: () => {
         throw new Error("no pool in mock");
       },
-    };
+    } as any as DatabaseApi;
 
     const result = await MockDb.query<{ id: number }>("SELECT $1", [
       99,
