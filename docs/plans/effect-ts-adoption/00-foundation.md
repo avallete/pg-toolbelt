@@ -4,22 +4,22 @@ overview: Install Effect ecosystem packages in both packages, verify tsconfig co
 todos:
   - id: install-pg-topo-deps
     content: Install effect and @effect/platform in pg-topo
-    status: pending
+    status: completed
   - id: install-pg-delta-deps
     content: Install effect, @effect/platform in pg-delta
-    status: pending
+    status: completed
   - id: install-dev-deps
     content: Install @effect/platform-bun as devDependency in both packages
-    status: pending
+    status: completed
   - id: verify-tsconfig-topo
     content: Verify pg-topo tsconfig.json is compatible with Effect
-    status: pending
+    status: completed
   - id: verify-tsconfig-delta
     content: Verify pg-delta tsconfig.json/tsconfig.build.json are compatible with Effect
-    status: pending
+    status: completed
   - id: verify-build
     content: Run bun install, bun run build, bun run check-types to verify nothing breaks
-    status: pending
+    status: completed
 isProject: false
 ---
 
