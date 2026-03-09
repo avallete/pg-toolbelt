@@ -9,6 +9,7 @@ import {
   getPgDeltaLogger,
 } from "../../core/logging.ts";
 import { rootCommand } from "../app.ts";
+import { logError } from "../ui.ts";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../../../package.json") as { version: string };
@@ -28,6 +29,9 @@ cli(process.argv).pipe(
   Effect.catchTags({
     CliExitError: (err) =>
       Effect.sync(() => {
+        if (err.message) {
+          logError(err.message);
+        }
         process.exitCode = err.exitCode;
       }),
     ChangesDetected: () =>

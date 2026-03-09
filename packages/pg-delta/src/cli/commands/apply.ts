@@ -8,7 +8,6 @@ import { Effect } from "effect";
 import { applyPlan } from "../../core/plan/apply.ts";
 import { deserializePlan, type Plan } from "../../core/plan/index.ts";
 import { CliExitError } from "../errors.ts";
-import { logError } from "../ui.ts";
 import { handleApplyResult, validatePlanRisk } from "../utils.ts";
 
 const plan = Options.text("plan").pipe(
@@ -44,7 +43,7 @@ export const applyCommand = Command.make(
             exitCode: 1,
             message: `Error reading plan file: ${error instanceof Error ? error.message : String(error)}`,
           }),
-      }).pipe(Effect.tapError((e) => Effect.sync(() => logError(e.message))));
+      });
 
       const parsedPlan: Plan = yield* Effect.try({
         try: () => deserializePlan(planJson),
@@ -53,7 +52,7 @@ export const applyCommand = Command.make(
             exitCode: 1,
             message: `Error parsing plan file: ${error instanceof Error ? error.message : String(error)}`,
           }),
-      }).pipe(Effect.tapError((e) => Effect.sync(() => logError(e.message))));
+      });
 
       const validation = validatePlanRisk(parsedPlan, args.unsafe);
       if (!validation.valid) {

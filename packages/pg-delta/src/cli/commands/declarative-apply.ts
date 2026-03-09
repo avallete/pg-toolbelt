@@ -101,13 +101,14 @@ export const declarativeApplyCommand = Command.make(
             exitCode: 1,
             message: `Error: ${error instanceof Error ? error.message : String(error)}`,
           }),
-      }).pipe(Effect.tapError((e) => Effect.sync(() => logError(e.message))));
+      });
 
       if (content.length === 0) {
-        const msg = `No .sql files found in '${args.path}'. Pass a directory containing .sql files or a single .sql file.`;
-        logError(msg);
         return yield* Effect.fail(
-          new CliExitError({ exitCode: 1, message: msg }),
+          new CliExitError({
+            exitCode: 1,
+            message: `No .sql files found in '${args.path}'. Pass a directory containing .sql files or a single .sql file.`,
+          }),
         );
       }
 
@@ -125,7 +126,7 @@ export const declarativeApplyCommand = Command.make(
             exitCode: 1,
             message: `Error: ${error instanceof Error ? error.message : String(error)}`,
           }),
-      }).pipe(Effect.tapError((e) => Effect.sync(() => logError(e.message))));
+      });
 
       const diagnosticDisplayOrder: Record<string, number> = {
         UNKNOWN_STATEMENT_CLASS: 0,
