@@ -1,7 +1,10 @@
+import { Effect } from "effect";
 import {
   loadModule as loadPlpgsqlParserModule,
   parseSql,
 } from "plpgsql-parser";
+import { ValidationError } from "./errors.ts";
+import { ParserService } from "./services/parser.ts";
 
 let parserModuleLoadPromise: Promise<void> | null = null;
 
@@ -25,3 +28,25 @@ export const validateSqlSyntax = async (sql: string): Promise<void> => {
   // parseSql throws on syntax errors
   parseSql(sql);
 };
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+/**
+ * Validate SQL syntax using the ParserService. The WASM module loading
+ * is handled by the service layer.
+ */
+export const validateSqlSyntaxEffect = (
+  sql: string,
+): Effect.Effect<void, ValidationError, ParserService> =>
+  Effect.gen(function* () {
+    const parser = yield* ParserService;
+    yield* parser
+      .parseSqlContent(sql, "<validation>")
+      .pipe(
+        Effect.mapError(
+          (e) => new ValidationError({ message: e.message, cause: e }),
+        ),
+      );
+  });
