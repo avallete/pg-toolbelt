@@ -391,7 +391,7 @@ export function compilePatterns(
         regex = new RegExp(p.pattern);
       } catch (e) {
         const msg = `Skipping invalid grouping regex '${p.pattern}': ${e instanceof Error ? e.message : String(e)}`;
-        logger.debug(msg);
+        logger.debug("{msg}", { msg });
         warnings.push(msg);
         continue;
       }
