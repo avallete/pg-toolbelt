@@ -79,12 +79,15 @@ const extractStatementSql = async (
   return "";
 };
 
-export const parseSqlContent = async (
+/**
+ * Core implementation — assumes the parser WASM module is already loaded.
+ * Used by `ParserServiceLive` which handles module loading via `Effect.once`.
+ */
+export const parseSqlContentImpl = async (
   content: string,
   sourceLabel: string,
 ): Promise<ParseContentResult> => {
   const diagnostics: Diagnostic[] = [];
-  await ensureParserModuleLoaded();
 
   let parseResult: RawParserResult;
   try {
@@ -155,4 +158,16 @@ export const parseSqlContent = async (
   }
 
   return { statements, diagnostics };
+};
+
+/**
+ * Backward-compatible wrapper that ensures the parser module is loaded before parsing.
+ * New code should use `ParserService` from `../services/parser.ts` instead.
+ */
+export const parseSqlContent = async (
+  content: string,
+  sourceLabel: string,
+): Promise<ParseContentResult> => {
+  await ensureParserModuleLoaded();
+  return parseSqlContentImpl(content, sourceLabel);
 };
