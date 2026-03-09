@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const membershipInfoSchema = Schema.mutable(
@@ -463,3 +465,20 @@ export async function extractRoles(pool: Pool): Promise<Role[]> {
   );
   return validatedRows.map((row: RoleProps) => new Role(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractRolesEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Role[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractRoles(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractRoles failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractRoles",
+        cause: err,
+      }),
+  });

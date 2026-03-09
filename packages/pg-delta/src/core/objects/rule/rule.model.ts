@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import { stableId } from "../utils.ts";
 
@@ -173,3 +175,20 @@ export async function extractRules(pool: Pool): Promise<Rule[]> {
 
   return validatedRows.map((row) => new Rule(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractRulesEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Rule[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractRules(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractRules failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractRules",
+        cause: err,
+      }),
+  });

@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import {
   BasePgModel,
   columnPropsSchema,
@@ -254,3 +256,20 @@ export async function extractCompositeTypes(
   );
   return validatedRows.map((row: CompositeTypeProps) => new CompositeType(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractCompositeTypesEffect = (
+  db: DatabaseApi,
+): Effect.Effect<CompositeType[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractCompositeTypes(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractCompositeTypes failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractCompositeTypes",
+        cause: err,
+      }),
+  });

@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -150,3 +152,20 @@ async function _extractLanguages(pool: Pool): Promise<Language[]> {
   );
   return validatedRows.map((row: LanguageProps) => new Language(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractLanguagesEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Language[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => _extractLanguages(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractLanguages failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractLanguages",
+        cause: err,
+      }),
+  });

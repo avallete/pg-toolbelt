@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const TableRelkindSchema = Schema.Literal(
@@ -372,3 +374,20 @@ export async function extractIndexes(pool: Pool): Promise<Index[]> {
   );
   return validatedRows.map((row: IndexProps) => new Index(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractIndexesEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Index[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractIndexes(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractIndexes failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractIndexes",
+        cause: err,
+      }),
+  });

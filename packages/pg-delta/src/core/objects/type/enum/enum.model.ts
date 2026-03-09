@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 import {
   type PrivilegeProps,
@@ -196,3 +198,20 @@ order by
   );
   return validatedEnums.map((e: EnumProps) => new Enum(e));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractEnumsEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Enum[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractEnums(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractEnums failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractEnums",
+        cause: err,
+      }),
+  });

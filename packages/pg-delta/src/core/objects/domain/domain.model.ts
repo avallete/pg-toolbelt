@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -192,3 +194,20 @@ export async function extractDomains(pool: Pool): Promise<Domain[]> {
   );
   return validatedRows.map((row: DomainProps) => new Domain(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractDomainsEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Domain[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractDomains(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractDomains failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractDomains",
+        cause: err,
+      }),
+  });

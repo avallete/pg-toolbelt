@@ -1,7 +1,9 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
 import { extractVersion } from "../../context.ts";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 /**
@@ -224,3 +226,20 @@ export async function extractCollations(pool: Pool): Promise<Collation[]> {
   );
   return validatedRows.map((row: CollationProps) => new Collation(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractCollationsEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Collation[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractCollations(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractCollations failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractCollations",
+        cause: err,
+      }),
+  });

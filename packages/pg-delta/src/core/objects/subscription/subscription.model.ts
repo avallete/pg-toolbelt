@@ -1,6 +1,8 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
 import { extractVersion } from "../../context.ts";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const subscriptionPropsSchema = Schema.mutable(
@@ -192,3 +194,20 @@ export async function extractSubscriptions(
   );
   return validated.map((row) => new Subscription(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractSubscriptionsEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Subscription[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractSubscriptions(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractSubscriptions failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractSubscriptions",
+        cause: err,
+      }),
+  });

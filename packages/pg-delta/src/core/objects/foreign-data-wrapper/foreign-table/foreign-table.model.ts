@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import {
   BasePgModel,
   columnPropsSchema,
@@ -243,3 +245,20 @@ export async function extractForeignTables(
   });
   return validatedRows.map((row: ForeignTableProps) => new ForeignTable(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractForeignTablesEffect = (
+  db: DatabaseApi,
+): Effect.Effect<ForeignTable[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractForeignTables(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractForeignTables failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractForeignTables",
+        cause: err,
+      }),
+  });

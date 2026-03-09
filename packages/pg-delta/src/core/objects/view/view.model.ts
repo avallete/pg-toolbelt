@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import {
   BasePgModel,
   columnPropsSchema,
@@ -268,3 +270,20 @@ order by
   );
   return validatedRows.map((row: ViewProps) => new View(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractViewsEffect = (
+  db: DatabaseApi,
+): Effect.Effect<View[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractViews(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractViews failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractViews",
+        cause: err,
+      }),
+  });

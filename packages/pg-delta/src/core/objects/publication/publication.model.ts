@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const publicationTablePropsSchema = Schema.mutable(
@@ -210,3 +212,20 @@ export async function extractPublications(pool: Pool): Promise<Publication[]> {
   );
   return validated.map((row) => new Publication(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractPublicationsEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Publication[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractPublications(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractPublications failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractPublications",
+        cause: err,
+      }),
+  });

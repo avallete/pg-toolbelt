@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 
 /**
@@ -97,3 +99,20 @@ export async function extractUserMappings(pool: Pool): Promise<UserMapping[]> {
   });
   return validatedRows.map((row: UserMappingProps) => new UserMapping(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractUserMappingsEffect = (
+  db: DatabaseApi,
+): Effect.Effect<UserMapping[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractUserMappings(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractUserMappings failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractUserMappings",
+        cause: err,
+      }),
+  });

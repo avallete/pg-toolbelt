@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const RlsPolicyCommandSchema = Schema.Literal(
@@ -140,3 +142,20 @@ order by
   );
   return validatedRows.map((row: RlsPolicyProps) => new RlsPolicy(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractRlsPoliciesEffect = (
+  db: DatabaseApi,
+): Effect.Effect<RlsPolicy[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractRlsPolicies(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractRlsPolicies failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractRlsPolicies",
+        cause: err,
+      }),
+  });

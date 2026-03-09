@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema as EffectSchema } from "effect";
+import { Effect, Schema as EffectSchema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -107,3 +109,20 @@ export async function extractSchemas(pool: Pool): Promise<Schema[]> {
   );
   return validatedRows.map((row: SchemaProps) => new Schema(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractSchemasEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Schema[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractSchemas(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractSchemas failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractSchemas",
+        cause: err,
+      }),
+  });

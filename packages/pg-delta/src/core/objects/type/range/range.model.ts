@@ -1,6 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { Pool } from "pg";
+import { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 import {
   type PrivilegeProps,
@@ -189,3 +191,20 @@ order by 1, 2
   );
   return validated.map((row: RangeProps) => new Range(row));
 }
+
+// ============================================================================
+// Effect-native version
+// ============================================================================
+
+export const extractRangesEffect = (
+  db: DatabaseApi,
+): Effect.Effect<Range[], CatalogExtractionError> =>
+  Effect.tryPromise({
+    try: () => extractRanges(db.getPool()),
+    catch: (err) =>
+      new CatalogExtractionError({
+        message: `extractRanges failed: ${err instanceof Error ? err.message : err}`,
+        extractor: "extractRanges",
+        cause: err,
+      }),
+  });
