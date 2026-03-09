@@ -1,5 +1,57 @@
+import { createInterface } from "node:readline/promises";
 import * as clack from "@clack/prompts";
 import type { CommandContext } from "@stricli/core";
+
+const NON_INTERACTIVE_CONFIRM_TIMEOUT_MS = 1_000;
+
+function isAffirmativeResponse(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "y" || normalized === "yes";
+}
+
+async function confirmFromStdin(
+  context: CommandContext,
+  message: string,
+): Promise<boolean> {
+  const io = context.process as unknown as {
+    stdin?: NodeJS.ReadableStream & {
+      isTTY?: boolean;
+    };
+  };
+  const stdin = io.stdin;
+  if (!stdin) {
+    return false;
+  }
+  const typedStdin = stdin as NodeJS.ReadableStream & {
+    isTTY?: boolean;
+  };
+  const stdout = getStdout(context);
+  const rl = createInterface({
+    input: typedStdin,
+    output: stdout,
+    terminal: false,
+  });
+
+  try {
+    const answerPromise = rl.question(`${message} (y/N) `);
+    const answer = typedStdin.isTTY
+      ? await answerPromise
+      : await Promise.race<string | undefined>([
+          answerPromise,
+          new Promise<undefined>((resolve) =>
+            setTimeout(
+              () => resolve(undefined),
+              NON_INTERACTIVE_CONFIRM_TIMEOUT_MS,
+            ),
+          ),
+        ]);
+    return isAffirmativeResponse(answer ?? "");
+  } catch {
+    return false;
+  } finally {
+    rl.close();
+  }
+}
 
 function getStdout(context: CommandContext): NodeJS.WritableStream {
   return context.process.stdout as unknown as NodeJS.WritableStream;
@@ -58,7 +110,7 @@ export async function confirmAction(
   message: string,
 ): Promise<boolean> {
   if (!isInteractiveCli(context)) {
-    return false;
+    return confirmFromStdin(context, message);
   }
 
   const result = await clack.confirm({
