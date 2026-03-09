@@ -1,75 +1,108 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
-import type { CommandContext } from "@stricli/core";
 import { confirmAction } from "./ui.ts";
 import { promptConfirmation } from "./utils.ts";
 
-interface MockContextOptions {
+interface MockStdioOptions {
   input: string;
   stdinIsTTY?: boolean;
   stdoutIsTTY?: boolean;
 }
 
-function createMockContext({
-  input,
-  stdinIsTTY = false,
-  stdoutIsTTY = false,
-}: MockContextOptions): {
-  context: CommandContext;
-  getStdoutOutput: () => string;
-} {
-  const stdin = new PassThrough();
-  const stdout = new PassThrough();
-  const stderr = new PassThrough();
-  (stdin as unknown as { isTTY?: boolean }).isTTY = stdinIsTTY;
-  (stdout as unknown as { isTTY?: boolean }).isTTY = stdoutIsTTY;
-  (stderr as unknown as { isTTY?: boolean }).isTTY = false;
+function withMockStdio(
+  { input, stdinIsTTY = false, stdoutIsTTY = false }: MockStdioOptions,
+  fn: () => Promise<unknown>,
+): { run: () => Promise<void>; getStdoutOutput: () => string } {
+  const fakeStdin = new PassThrough();
+  const fakeStdout = new PassThrough();
+  const fakeStderr = new PassThrough();
+  (fakeStdin as unknown as { isTTY?: boolean }).isTTY = stdinIsTTY;
+  (fakeStdout as unknown as { isTTY?: boolean }).isTTY = stdoutIsTTY;
+  (fakeStderr as unknown as { isTTY?: boolean }).isTTY = false;
 
   let stdoutOutput = "";
-  stdout.setEncoding("utf8");
-  stdout.on("data", (chunk: string) => {
+  fakeStdout.setEncoding("utf8");
+  fakeStdout.on("data", (chunk: string) => {
     stdoutOutput += chunk;
   });
 
-  stdin.end(input);
+  fakeStdin.end(input);
 
   return {
-    context: {
-      process: {
-        stdin,
-        stdout,
-        stderr,
-      },
-    } as unknown as CommandContext,
+    run: async () => {
+      const origStdin = process.stdin;
+      const origStdout = process.stdout;
+      const origStderr = process.stderr;
+      Object.defineProperty(process, "stdin", {
+        value: fakeStdin,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(process, "stdout", {
+        value: fakeStdout,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(process, "stderr", {
+        value: fakeStderr,
+        writable: true,
+        configurable: true,
+      });
+      try {
+        await fn();
+      } finally {
+        Object.defineProperty(process, "stdin", {
+          value: origStdin,
+          writable: true,
+          configurable: true,
+        });
+        Object.defineProperty(process, "stdout", {
+          value: origStdout,
+          writable: true,
+          configurable: true,
+        });
+        Object.defineProperty(process, "stderr", {
+          value: origStderr,
+          writable: true,
+          configurable: true,
+        });
+      }
+    },
     getStdoutOutput: () => stdoutOutput,
   };
 }
 
 describe("confirmAction", () => {
   test("accepts piped yes input in non-interactive mode", async () => {
-    const { context } = createMockContext({ input: "y\n" });
-    const result = await confirmAction(context, "Apply these changes?");
+    let result = false;
+    const mock = withMockStdio({ input: "y\n" }, async () => {
+      result = await confirmAction("Apply these changes?");
+    });
+    await mock.run();
     expect(result).toBe(true);
   });
 
   test("rejects piped no input in non-interactive mode", async () => {
-    const { context } = createMockContext({ input: "n\n" });
-    const result = await confirmAction(context, "Apply these changes?");
+    let result = true;
+    const mock = withMockStdio({ input: "n\n" }, async () => {
+      result = await confirmAction("Apply these changes?");
+    });
+    await mock.run();
     expect(result).toBe(false);
   });
 });
 
 describe("promptConfirmation", () => {
   test("normalizes prompt text and still accepts piped confirmation", async () => {
-    const { context, getStdoutOutput } = createMockContext({ input: "yes\n" });
-    const result = await promptConfirmation(
-      "Apply these changes? (y/N) ",
-      context,
-    );
+    let result = false;
+    const mock = withMockStdio({ input: "yes\n" }, async () => {
+      result = await promptConfirmation("Apply these changes? (y/N) ");
+    });
+    await mock.run();
 
     expect(result).toBe(true);
-    expect(getStdoutOutput()).toContain("Apply these changes (y/N) ");
-    expect(getStdoutOutput()).not.toContain(
+    expect(mock.getStdoutOutput()).toContain("Apply these changes (y/N) ");
+    expect(mock.getStdoutOutput()).not.toContain(
       "Apply these changes? (y/N) (y/N) ",
     );
   });

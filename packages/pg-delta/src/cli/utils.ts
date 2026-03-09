@@ -2,7 +2,6 @@
  * Shared utility functions for CLI commands.
  */
 
-import type { CommandContext } from "@stricli/core";
 import chalk from "chalk";
 import type { Change } from "../core/change.types.ts";
 import type { DiffContext } from "../core/context.ts";
@@ -131,13 +130,11 @@ export function formatPlanForDisplay(
 export function validatePlanRisk(
   plan: Plan,
   unsafe: boolean,
-  context: CommandContext,
   options?: { suppressWarning?: boolean },
 ): { valid: boolean; exitCode?: number } {
   if (!unsafe) {
     if (!plan.risk) {
       logError(
-        context,
         "Plan is missing risk metadata. Regenerate the plan with the current pgdelta or re-run with --unsafe to apply anyway.",
       );
       return { valid: false, exitCode: 1 };
@@ -151,7 +148,7 @@ export function validatePlanRisk(
           ),
           chalk.yellow("Use `--unsafe` to allow applying these operations."),
         ];
-        logWarning(context, warningLines.join("\n"));
+        logWarning(warningLines.join("\n"));
       }
       return { valid: false, exitCode: 1 };
     }
@@ -163,40 +160,36 @@ export function validatePlanRisk(
  * Handles applyPlan results and writes appropriate output.
  * Returns the exit code that should be set.
  */
-export function handleApplyResult(
-  result: ApplyPlanResult,
-  context: CommandContext,
-): { exitCode: number } {
+export function handleApplyResult(result: ApplyPlanResult): {
+  exitCode: number;
+} {
   switch (result.status) {
     case "invalid_plan":
-      logError(context, result.message);
+      logError(result.message);
       return { exitCode: 1 };
     case "fingerprint_mismatch":
       logError(
-        context,
         "Target database does not match plan source fingerprint. Aborting.",
       );
       return { exitCode: 1 };
     case "already_applied":
       logInfo(
-        context,
         "Plan already applied (target fingerprint matches desired state).",
       );
       return { exitCode: 0 };
     case "failed": {
       logError(
-        context,
         `Failed to apply changes: ${result.error instanceof Error ? result.error.message : String(result.error)}`,
       );
-      logError(context, `Migration script:\n${result.script}`);
+      logError(`Migration script:\n${result.script}`);
       return { exitCode: 1 };
     }
     case "applied": {
-      logInfo(context, `Applying ${result.statements} changes to database...`);
-      logInfo(context, "Successfully applied all changes.");
+      logInfo(`Applying ${result.statements} changes to database...`);
+      logInfo("Successfully applied all changes.");
       if (result.warnings?.length) {
         for (const warning of result.warnings) {
-          logWarning(context, `Warning: ${warning}`);
+          logWarning(`Warning: ${warning}`);
         }
       }
       return { exitCode: 0 };
@@ -208,13 +201,10 @@ export function handleApplyResult(
  * Prompts user for confirmation using clack.
  * Falls back to stdin confirmation in non-interactive mode.
  */
-export function promptConfirmation(
-  question: string,
-  context: CommandContext,
-): Promise<boolean> {
+export function promptConfirmation(question: string): Promise<boolean> {
   const promptMessage = question
     .replace(/\(y\/N\)\s*$/i, "")
     .trim()
     .replace(/\?$/, "");
-  return confirmAction(context, promptMessage);
+  return confirmAction(promptMessage);
 }
