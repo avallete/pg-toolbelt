@@ -180,3 +180,25 @@ expect(result.sql).toMatchInlineSnapshot(`
 ```
 
 Run tests once to auto-generate the snapshot values — Bun will fill them in automatically on first run. Update snapshots intentionally with `bun run test -u -- <test-name>`.
+
+## Cursor Cloud specific instructions
+
+### Prerequisites
+
+Bun and Docker are pre-installed in the VM snapshot. The update script runs `bun install` automatically on startup.
+
+### Starting Docker
+
+Docker daemon is **not** auto-started. Before running any integration tests or any test that uses testcontainers, start it:
+
+```bash
+sudo dockerd &>/tmp/dockerd.log &
+sleep 3
+sudo chmod 666 /var/run/docker.sock
+```
+
+### Gotchas
+
+- `src/core/catalog.snapshot.test.ts` in pg-delta is classified as a unit test (lives in `src/`) but requires Docker because it uses testcontainers. If Docker is not running, this single test will fail while all other unit tests pass.
+- First integration test run in a fresh session pulls PostgreSQL Docker images (~100-200 MB each), which adds ~20-60s to the first test. Subsequent runs reuse cached images.
+- All standard dev commands (`bun run build`, `bun run check-types`, `bun run format-and-lint`, `bun run test:pg-delta`, `bun run test:pg-topo`) are documented in the Quick Reference section above and in the root `README.md`.
