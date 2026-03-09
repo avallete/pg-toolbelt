@@ -3,6 +3,7 @@
  */
 
 import chalk from "chalk";
+import { Effect } from "effect";
 import type { Change } from "../core/change.types.ts";
 import type { DiffContext } from "../core/context.ts";
 import { groupChangesHierarchically } from "../core/plan/hierarchy.ts";
@@ -10,8 +11,26 @@ import { type Plan, serializePlan } from "../core/plan/index.ts";
 import { classifyChangesRisk } from "../core/plan/risk.ts";
 import type { SqlFormatOptions } from "../core/plan/sql-format.ts";
 import { formatSqlScript } from "../core/plan/statements.ts";
+import { CliExitError } from "./errors.ts";
 import { formatTree } from "./formatters/index.ts";
 import { confirmAction, logError, logInfo, logWarning } from "./ui.ts";
+
+/**
+ * Parse a JSON string inside an Effect context. Replaces the throwing
+ * `parseJsonSafe` / `parseJsonFlag` helpers that were called from Effect.gen.
+ */
+export const parseJsonEffect = <T>(
+  label: string,
+  value: string,
+): Effect.Effect<T, CliExitError> =>
+  Effect.try({
+    try: () => JSON.parse(value) as T,
+    catch: (error) =>
+      new CliExitError({
+        exitCode: 1,
+        message: `Invalid ${label} JSON: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+  });
 
 // Re-export ApplyPlanResult type for convenience
 type ApplyPlanResult =
