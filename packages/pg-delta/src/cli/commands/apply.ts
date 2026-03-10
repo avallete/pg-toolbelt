@@ -7,7 +7,7 @@ import { Command, Options } from "@effect/cli";
 import { Effect } from "effect";
 import { applyPlan } from "../../core/plan/apply.ts";
 import { deserializePlan, type Plan } from "../../core/plan/index.ts";
-import { logError } from "../ui.ts";
+import { CliExitError } from "../errors.ts";
 import { handleApplyResult, validatePlanRisk } from "../utils.ts";
 
 const plan = Options.text("plan").pipe(
@@ -36,32 +36,33 @@ export const applyCommand = Command.make(
   { plan, source, target, unsafe },
   (args) =>
     Effect.gen(function* () {
-      let planJson: string;
-      try {
-        planJson = yield* Effect.promise(() => readFile(args.plan, "utf-8"));
-      } catch (error) {
-        logError(
-          `Error reading plan file: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        process.exitCode = 1;
-        return;
-      }
+      const planJson = yield* Effect.tryPromise({
+        try: () => readFile(args.plan, "utf-8"),
+        catch: (error) =>
+          new CliExitError({
+            exitCode: 1,
+            message: `Error reading plan file: ${error instanceof Error ? error.message : String(error)}`,
+          }),
+      });
 
-      let parsedPlan: Plan;
-      try {
-        parsedPlan = deserializePlan(planJson);
-      } catch (error) {
-        logError(
-          `Error parsing plan file: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        process.exitCode = 1;
-        return;
-      }
+      const parsedPlan: Plan = yield* Effect.try({
+        try: () => deserializePlan(planJson),
+        catch: (error) =>
+          new CliExitError({
+            exitCode: 1,
+            message: `Error parsing plan file: ${error instanceof Error ? error.message : String(error)}`,
+          }),
+      });
 
       const validation = validatePlanRisk(parsedPlan, args.unsafe);
       if (!validation.valid) {
-        process.exitCode = validation.exitCode ?? 1;
-        return;
+        return yield* Effect.fail(
+          new CliExitError({
+            exitCode: validation.exitCode ?? 1,
+            message:
+              "Plan blocked: unsafe operations require the --unsafe flag",
+          }),
+        );
       }
 
       const result = yield* Effect.promise(() =>
@@ -71,6 +72,10 @@ export const applyCommand = Command.make(
       );
 
       const { exitCode } = handleApplyResult(result);
-      process.exitCode = exitCode;
+      if (exitCode !== 0) {
+        return yield* Effect.fail(
+          new CliExitError({ exitCode, message: "Plan apply failed" }),
+        );
+      }
     }),
 );

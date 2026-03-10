@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createRequire } from "node:module";
 import { Command } from "@effect/cli";
 import { BunContext, BunRuntime } from "@effect/platform-bun";
 import { Effect } from "effect";
@@ -8,7 +9,10 @@ import {
   getPgDeltaLogger,
 } from "../../core/logging.ts";
 import { rootCommand } from "../app.ts";
-import { getCommandExitCode } from "../exit-code.ts";
+import { logError } from "../ui.ts";
+
+const require = createRequire(import.meta.url);
+const packageJson = require("../../../package.json") as { version: string };
 
 await configurePgDeltaLogging({
   debug: process.env.DEBUG,
@@ -18,10 +22,27 @@ const logger = getPgDeltaLogger("cli");
 
 const cli = Command.run(rootCommand, {
   name: "pgdelta",
-  version: "1.0.0-alpha.4",
+  version: packageJson.version,
 });
 
 cli(process.argv).pipe(
+  Effect.catchTags({
+    CliExitError: (err) =>
+      Effect.sync(() => {
+        if (err.message) {
+          logError(err.message);
+        }
+        process.exitCode = err.exitCode;
+      }),
+    ChangesDetected: () =>
+      Effect.sync(() => {
+        process.exitCode = 2;
+      }),
+    UserCancelled: () =>
+      Effect.sync(() => {
+        process.exitCode = 2;
+      }),
+  }),
   Effect.tapErrorCause((cause) =>
     Effect.sync(() => {
       const error = cause.toJSON();
@@ -33,14 +54,6 @@ cli(process.argv).pipe(
         logger.error("CLI command failed: {error}", {
           error: String(cause),
         });
-      }
-    }),
-  ),
-  Effect.ensuring(
-    Effect.sync(() => {
-      const code = getCommandExitCode();
-      if (code !== undefined) {
-        process.exitCode = code;
       }
     }),
   ),
