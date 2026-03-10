@@ -21,7 +21,7 @@ const RelationPersistenceSchema = Schema.Literal(
   "t", // temporary
 );
 
-export const ReplicaIdentitySchema = Schema.Literal(
+const ReplicaIdentitySchema = Schema.Literal(
   "d", // DEFAULT (use default key)
   "n", // NOTHING (no replica identity)
   "f", // FULL (all columns)

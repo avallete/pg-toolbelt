@@ -121,7 +121,7 @@ export interface HierarchicalPlan {
 /**
  * Plan risk schema — either safe or data_loss with affected statements.
  */
-export const PlanRiskSchema = Schema.Union(
+const PlanRiskSchema = Schema.Union(
   Schema.Struct({ level: Schema.Literal("safe") }),
   Schema.Struct({
     level: Schema.Literal("data_loss"),

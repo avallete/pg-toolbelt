@@ -73,7 +73,7 @@ export class PlanApplyError extends Data.TaggedError("PlanApplyError")<{
  */
 export class AlreadyAppliedError extends Data.TaggedError(
   "AlreadyAppliedError",
-)<{}> {}
+) {}
 
 // ---------------------------------------------------------------------------
 // Declarative apply errors

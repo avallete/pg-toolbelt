@@ -173,3 +173,6 @@ declarative-schemas/
 # tldr ignore patterns
 # ===================
 .tldr/
+
+# Effect codebase
+effect-smol/
