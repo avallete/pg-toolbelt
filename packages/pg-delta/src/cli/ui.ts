@@ -1,6 +1,5 @@
 import { createInterface } from "node:readline/promises";
 import * as clack from "@clack/prompts";
-import type { CommandContext } from "@stricli/core";
 
 const NON_INTERACTIVE_CONFIRM_TIMEOUT_MS = 1_000;
 
@@ -9,32 +8,20 @@ function isAffirmativeResponse(value: string): boolean {
   return normalized === "y" || normalized === "yes";
 }
 
-async function confirmFromStdin(
-  context: CommandContext,
-  message: string,
-): Promise<boolean> {
-  const io = context.process as unknown as {
-    stdin?: NodeJS.ReadableStream & {
-      isTTY?: boolean;
-    };
-  };
-  const stdin = io.stdin;
-  if (!stdin) {
-    return false;
-  }
-  const typedStdin = stdin as NodeJS.ReadableStream & {
+async function confirmFromStdin(message: string): Promise<boolean> {
+  const stdin = process.stdin as NodeJS.ReadableStream & {
     isTTY?: boolean;
   };
-  const stdout = getStdout(context);
+  const stdout = process.stdout;
   const rl = createInterface({
-    input: typedStdin,
+    input: stdin,
     output: stdout,
     terminal: false,
   });
 
   try {
     const answerPromise = rl.question(`${message} (y/N) `);
-    const answer = typedStdin.isTTY
+    const answer = stdin.isTTY
       ? await answerPromise
       : await Promise.race<string | undefined>([
           answerPromise,
@@ -53,64 +40,49 @@ async function confirmFromStdin(
   }
 }
 
-function getStdout(context: CommandContext): NodeJS.WritableStream {
-  return context.process.stdout as unknown as NodeJS.WritableStream;
-}
-
-function getStderr(context: CommandContext): NodeJS.WritableStream {
-  return context.process.stderr as unknown as NodeJS.WritableStream;
-}
-
 function writeLine(stream: NodeJS.WritableStream, message: string): void {
   stream.write(message.endsWith("\n") ? message : `${message}\n`);
 }
 
-function isInteractiveCli(context: CommandContext): boolean {
-  const io = context.process as unknown as {
-    stdin?: { isTTY?: boolean };
-    stdout?: { isTTY?: boolean };
-  };
-  return Boolean(io.stdin?.isTTY && io.stdout?.isTTY && !clack.isCI());
+function isInteractiveCli(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY && !clack.isCI());
 }
 
-export function logInfo(context: CommandContext, message: string): void {
-  if (isInteractiveCli(context)) {
+export function logInfo(message: string): void {
+  if (isInteractiveCli()) {
     clack.log.info(message);
     return;
   }
-  writeLine(getStdout(context), message);
+  writeLine(process.stdout, message);
 }
 
-export function logSuccess(context: CommandContext, message: string): void {
-  if (isInteractiveCli(context)) {
+export function logSuccess(message: string): void {
+  if (isInteractiveCli()) {
     clack.log.success(message);
     return;
   }
-  writeLine(getStdout(context), message);
+  writeLine(process.stdout, message);
 }
 
-export function logWarning(context: CommandContext, message: string): void {
-  if (isInteractiveCli(context)) {
+export function logWarning(message: string): void {
+  if (isInteractiveCli()) {
     clack.log.warn(message);
     return;
   }
-  writeLine(getStderr(context), message);
+  writeLine(process.stderr, message);
 }
 
-export function logError(context: CommandContext, message: string): void {
-  if (isInteractiveCli(context)) {
+export function logError(message: string): void {
+  if (isInteractiveCli()) {
     clack.log.error(message);
     return;
   }
-  writeLine(getStderr(context), message);
+  writeLine(process.stderr, message);
 }
 
-export async function confirmAction(
-  context: CommandContext,
-  message: string,
-): Promise<boolean> {
-  if (!isInteractiveCli(context)) {
-    return confirmFromStdin(context, message);
+export async function confirmAction(message: string): Promise<boolean> {
+  if (!isInteractiveCli()) {
+    return confirmFromStdin(message);
   }
 
   const result = await clack.confirm({
