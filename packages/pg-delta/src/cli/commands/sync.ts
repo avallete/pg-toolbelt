@@ -11,12 +11,19 @@ import type { ChangeSerializer } from "../../core/integrations/serialize/seriali
 import { applyPlan } from "../../core/plan/apply.ts";
 import { createPlan } from "../../core/plan/index.ts";
 import { CliExitError, UserCancelled } from "../errors.ts";
-import { logInfo, promptConfirmation, writeOutput } from "../ui.ts";
+import { setExitCode } from "../runtime.ts";
+import {
+  logInfo,
+  logWarningBlock,
+  promptConfirmation,
+  writeOutput,
+} from "../ui.ts";
 import { loadIntegrationDSL } from "../utils/integrations.ts";
 import {
   formatPlanForDisplay,
   handleApplyResult,
   parseJsonEffect,
+  tryCliPromise,
   validatePlanRisk,
 } from "../utils.ts";
 
@@ -93,15 +100,16 @@ export const syncCommand = Command.make(
       let serializeOption: SerializeDSL | ChangeSerializer | undefined =
         serializeParsed;
       if (integrationValue) {
-        const integrationDSL = yield* Effect.promise(() =>
-          loadIntegrationDSL(integrationValue),
+        const integrationDSL = yield* tryCliPromise(
+          "Error loading integration",
+          () => loadIntegrationDSL(integrationValue),
         );
         filterOption = filterOption ?? integrationDSL.filter;
         serializeOption = serializeOption ?? integrationDSL.serialize;
       }
 
       // 1. Create the plan
-      const planResult = yield* Effect.promise(() =>
+      const planResult = yield* tryCliPromise("Error creating plan", () =>
         createPlan(args.source, args.target, {
           role: roleValue,
           filter: filterOption,
@@ -122,19 +130,29 @@ export const syncCommand = Command.make(
         suppressWarning: true,
       });
       if (!validation.valid) {
+        const warning = validation.warning;
+        if (warning) {
+          yield* Effect.sync(() => {
+            logWarningBlock([
+              warning.title,
+              ...warning.statements.map((statement) => `- ${statement}`),
+              warning.suggestion,
+            ]);
+          });
+        }
         return yield* Effect.fail(
           new CliExitError({
-            exitCode: validation.exitCode ?? 1,
-            message:
-              "Plan blocked: unsafe operations require the --unsafe flag",
+            exitCode: validation.exitCode,
+            message: validation.message,
           }),
         );
       }
 
       // 4. Prompt for confirmation (unless --yes)
       if (!args.yes) {
-        const confirmed = yield* Effect.promise(() =>
-          promptConfirmation("Apply these changes? (y/N) "),
+        const confirmed = yield* tryCliPromise(
+          "Error reading confirmation",
+          () => promptConfirmation("Apply these changes? (y/N) "),
         );
         if (!confirmed) {
           return yield* Effect.fail(
@@ -144,7 +162,7 @@ export const syncCommand = Command.make(
       }
 
       // 5. Apply the plan
-      const result = yield* Effect.promise(() =>
+      const result = yield* tryCliPromise("Error applying plan", () =>
         applyPlan(planResult.plan, args.source, args.target, {
           verifyPostApply: true,
         }),
@@ -153,9 +171,10 @@ export const syncCommand = Command.make(
       // 6. Handle apply result
       const { exitCode } = handleApplyResult(result);
       if (exitCode !== 0) {
-        return yield* Effect.fail(
-          new CliExitError({ exitCode, message: "Plan apply failed" }),
-        );
+        yield* Effect.sync(() => {
+          setExitCode(exitCode);
+        });
+        return;
       }
     }),
 );

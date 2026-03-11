@@ -6,6 +6,7 @@
  */
 
 import { readFile } from "node:fs/promises";
+import type { PgRuntimeConfigApi } from "../runtime-config.ts";
 
 /** Parsed SSL options for the pg client plus URL with SSL params stripped (internal). */
 type SslConfig = {
@@ -37,6 +38,9 @@ type SslConfig = {
 export async function parseSslConfig(
   url: string,
   connectionType: "source" | "target",
+  runtimeConfig: Pick<PgRuntimeConfigApi, "getEnv"> = {
+    getEnv: (name) => globalThis.process?.env?.[name],
+  },
 ): Promise<SslConfig> {
   const urlObj = new URL(url);
   const sslmode = urlObj.searchParams.get("sslmode");
@@ -78,7 +82,7 @@ export async function parseSslConfig(
         }
       }
       // Fallback to environment variable (content)
-      const envValue = process.env[envVarName];
+      const envValue = runtimeConfig.getEnv(envVarName);
       return envValue || undefined;
     };
 

@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import type { Pool } from "pg";
 import {
   extractCurrentUser,
   extractCurrentUserEffect,
@@ -138,7 +137,7 @@ import {
   extractViewsEffect,
   type View,
 } from "./objects/view/view.model.ts";
-import type { DatabaseApi } from "./services/database.ts";
+import type { DatabaseApi, Queryable } from "./services/database.ts";
 
 const SUBSCRIPTION_CONNINFO_PLACEHOLDER =
   "host=__CONN_HOST__ port=__CONN_PORT__ dbname=__CONN_DBNAME__ user=__CONN_USER__ password=__CONN_PASSWORD__";
@@ -365,7 +364,7 @@ export async function createEmptyCatalog(
   });
 }
 
-export async function extractCatalog(pool: Pool) {
+export async function extractCatalog(pool: Queryable) {
   const [
     aggregates,
     collations,

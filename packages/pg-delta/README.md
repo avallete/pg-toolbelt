@@ -36,7 +36,7 @@ The CLI provides two paradigms: **imperative** (diff-based migrations) and **dec
 **Sync (default)** - Plan and apply changes in one go:
 
 ```bash
-pg-delta sync \
+pgdelta sync \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db
 ```
@@ -44,7 +44,7 @@ pg-delta sync \
 **Plan** - Preview changes before applying:
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db \
   --output plan.json
@@ -53,7 +53,7 @@ pg-delta plan \
 **Apply** - Apply a previously created plan:
 
 ```bash
-pg-delta apply \
+pgdelta apply \
   --plan plan.json \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db
@@ -64,7 +64,7 @@ pg-delta apply \
 **Declarative export** - Export a database schema as `.sql` files:
 
 ```bash
-pg-delta declarative export \
+pgdelta declarative export \
   --target postgresql://user:pass@localhost:5432/mydb \
   --output ./declarative-schemas/
 ```
@@ -72,7 +72,7 @@ pg-delta declarative export \
 **Declarative apply** - Apply `.sql` files to a database:
 
 ```bash
-pg-delta declarative apply \
+pgdelta declarative apply \
   --path ./declarative-schemas/ \
   --target postgresql://user:pass@localhost:5432/fresh_db
 ```
@@ -82,7 +82,7 @@ pg-delta declarative apply \
 **Catalog export** - Snapshot a database catalog to JSON for offline diffing:
 
 ```bash
-pg-delta catalog-export \
+pgdelta catalog-export \
   --target postgresql://user:pass@localhost:5432/mydb \
   --output snapshot.json
 ```
@@ -97,24 +97,34 @@ Use built-in integrations or custom JSON files:
 
 ```bash
 # Built-in Supabase integration
-pg-delta sync --source <source> --target <target> --integration supabase
+pgdelta sync --source <source> --target <target> --integration supabase
 
 # Custom integration file
-pg-delta sync --source <source> --target <target> --integration ./my-integration.json
+pgdelta sync --source <source> --target <target> --integration ./my-integration.json
 ```
 
 ### Programmatic Usage
 
 ```typescript
-import { main } from "@supabase/pg-delta";
+import { applyPlan, createPlan } from "@supabase/pg-delta";
 
-const result = await main(
+const planResult = await createPlan(
   "postgresql://source",
-  "postgresql://target"
+  "postgresql://target",
 );
 
-if (result) {
-  console.log(result.migrationScript);
+if (planResult) {
+  console.log(planResult.plan.statements.join(";\n"));
+
+  const applyResult = await applyPlan(
+    planResult.plan,
+    "postgresql://source",
+    "postgresql://target",
+  );
+
+  if (applyResult.status === "applied") {
+    console.log(`Applied ${applyResult.statements} statements`);
+  }
 }
 ```
 
@@ -135,6 +145,23 @@ if (planResult) {
     planResult.plan,
     sourceUrl,
     targetUrl
+  );
+}
+```
+
+Effect-native entrypoints are also available:
+
+```typescript
+import { Effect } from "effect";
+import { applyPlanEffect, createPlanEffect } from "@supabase/pg-delta";
+
+const result = await createPlanEffect(sourceUrl, targetUrl).pipe(
+  Effect.runPromise,
+);
+
+if (result) {
+  await applyPlanEffect(result.plan, sourceUrl, targetUrl).pipe(
+    Effect.runPromise,
   );
 }
 ```

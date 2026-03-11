@@ -4,10 +4,36 @@ import { ParserService } from "./services/parser.ts";
 import { ParserServiceLive } from "./services/parser-live.ts";
 
 /**
- * Module-level managed runtime — shared with parse.ts. Lazily builds
- * ParserServiceLive on first use; WASM loading happens once via Effect.once.
+ * Dedicated managed runtime for the strict validation API. It is intentionally
+ * separate from the batch-analysis entrypoints because validation has different
+ * semantics: parser diagnostics should fail the call instead of being returned.
  */
 const parserRuntime = ManagedRuntime.make(ParserServiceLive);
+
+const toValidationError = (
+  sql: string,
+  parsed: {
+    statements: ReadonlyArray<unknown>;
+    diagnostics: ReadonlyArray<{ code: string; message: string }>;
+  },
+): ValidationError | null => {
+  const parseDiagnostic = parsed.diagnostics.find(
+    (diagnostic) => diagnostic.code === "PARSE_ERROR",
+  );
+  if (parseDiagnostic) {
+    return new ValidationError({ message: parseDiagnostic.message });
+  }
+
+  // A validation call that produced no statements is still invalid input even
+  // if the underlying parser surfaced it as an empty diagnostic result.
+  if (sql.trim().length > 0 && parsed.statements.length === 0) {
+    return new ValidationError({
+      message: "SQL did not produce any executable statements.",
+    });
+  }
+
+  return null;
+};
 
 /**
  * Validate that a SQL string is syntactically correct using the PostgreSQL parser.
@@ -20,14 +46,7 @@ const parserRuntime = ManagedRuntime.make(ParserServiceLive);
  * @param sql - The SQL statement to validate.
  */
 export const validateSqlSyntax = async (sql: string): Promise<void> => {
-  await parserRuntime.runPromise(
-    Effect.gen(function* () {
-      const parser = yield* ParserService;
-      // Use the parser to load/validate the module, then call parseSql directly
-      // since parseSqlContent returns parsed statements, but we just need syntax validation.
-      yield* parser.parseSqlContent(sql, "<validation>").pipe(Effect.asVoid);
-    }),
-  );
+  await parserRuntime.runPromise(validateSqlSyntaxEffect(sql));
 };
 
 // ============================================================================
@@ -43,11 +62,15 @@ export const validateSqlSyntaxEffect = (
 ): Effect.Effect<void, ValidationError, ParserService> =>
   Effect.gen(function* () {
     const parser = yield* ParserService;
-    yield* parser
+    const parsed = yield* parser
       .parseSqlContent(sql, "<validation>")
       .pipe(
         Effect.mapError(
           (e) => new ValidationError({ message: e.message, cause: e }),
         ),
       );
+    const validationError = toValidationError(sql, parsed);
+    if (validationError) {
+      return yield* Effect.fail(validationError);
+    }
   });

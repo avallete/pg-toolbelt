@@ -12,6 +12,7 @@ import {
 } from "../../core/catalog.snapshot.ts";
 import { createManagedPool } from "../../core/postgres-config.ts";
 import { logSuccess } from "../ui.ts";
+import { tryCliPromise } from "../utils.ts";
 
 const target = Flag.string("target").pipe(
   Flag.withAlias("t"),
@@ -37,20 +38,28 @@ export const catalogExportCommand = Command.make(
     Effect.gen(function* () {
       const roleValue = Option.getOrUndefined(args.role);
 
-      const { pool, close } = yield* Effect.promise(() =>
-        createManagedPool(args.target, {
-          role: roleValue,
-          label: "target",
-        }),
+      const { pool, close } = yield* tryCliPromise(
+        "Error connecting to target database",
+        () =>
+          createManagedPool(args.target, {
+            role: roleValue,
+            label: "target",
+          }),
       );
 
-      yield* Effect.tryPromise(() =>
+      yield* tryCliPromise("Error exporting catalog snapshot", () =>
         extractCatalog(pool).then(async (catalog) => {
           const snapshot = serializeCatalog(catalog);
           const json = stringifyCatalogSnapshot(snapshot);
           await writeFile(args.output, json, "utf-8");
           logSuccess(`Catalog snapshot written to ${args.output}`);
         }),
-      ).pipe(Effect.ensuring(Effect.promise(() => close())));
+      ).pipe(
+        Effect.ensuring(
+          Effect.ignore(
+            tryCliPromise("Error closing target database pool", () => close()),
+          ),
+        ),
+      );
     }),
 );

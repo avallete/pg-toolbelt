@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -94,7 +97,7 @@ export class Language extends BasePgModel {
   }
 }
 
-async function _extractLanguages(pool: Pool): Promise<Language[]> {
+async function _extractLanguages(pool: Queryable): Promise<Language[]> {
   const { rows: languageRows } = await pool.query<LanguageProps>(sql`
     with extension_oids as (
       select
@@ -160,7 +163,7 @@ const _extractLanguagesEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Language[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => _extractLanguages(db.getPool()),
+    try: () => _extractLanguages(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractLanguages failed: ${err instanceof Error ? err.message : err}`,

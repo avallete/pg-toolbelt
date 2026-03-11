@@ -2,10 +2,15 @@
  * PostgreSQL connection configuration with custom type handlers.
  */
 
+import { ConfigProvider, Effect } from "effect";
 import type { PoolClient, PoolConfig } from "pg";
 import { escapeIdentifier, Pool, types } from "pg";
 import { getPgDeltaLogger } from "./logging.ts";
 import { parseSslConfig } from "./plan/ssl-config.ts";
+import {
+  loadPgRuntimeConfig,
+  type PgRuntimeConfigApi,
+} from "./runtime-config.ts";
 
 // ============================================================================
 // Array Parser
@@ -105,12 +110,10 @@ types.setTypeParser(1007, (val: string) => parseArray(val, parseIntElement)); //
 // @ts-expect-error - pg types expects TypeId but raw OID numbers work fine
 types.setTypeParser(1016, (val: string) => parseArray(val, parseIntElement)); // int8[]
 
-const DEFAULT_POOL_MAX = Number(process.env.PGDELTA_POOL_MAX) || 5;
-const DEFAULT_CONNECTION_TIMEOUT_MS =
-  Number(process.env.PGDELTA_CONNECTION_TIMEOUT_MS) || 3_000;
-const DEFAULT_CONNECT_TIMEOUT_MS =
-  Number(process.env.PGDELTA_CONNECT_TIMEOUT_MS) || 2_500;
 const logger = getPgDeltaLogger("postgres");
+
+const getDefaultRuntimeConfig = (): PgRuntimeConfigApi =>
+  Effect.runSync(loadPgRuntimeConfig(ConfigProvider.fromEnv()));
 
 /**
  * Options for creating a Pool with event listeners.
@@ -132,12 +135,13 @@ interface CreatePoolOptions extends Partial<PoolConfig> {
 export function createPool(
   connectionString: string,
   options?: CreatePoolOptions,
+  runtimeConfig: PgRuntimeConfigApi = getDefaultRuntimeConfig(),
 ): Pool {
   const { onConnect, onError, onAcquire, onRemove, ...config } = options ?? {};
   const pool = new Pool({
     connectionString,
-    max: DEFAULT_POOL_MAX,
-    connectionTimeoutMillis: DEFAULT_CONNECTION_TIMEOUT_MS,
+    max: runtimeConfig.poolMax,
+    connectionTimeoutMillis: runtimeConfig.connectionTimeoutMs,
     ...config,
   });
 
@@ -173,31 +177,40 @@ export function createPool(
 export async function createManagedPool(
   url: string,
   options?: { role?: string; label?: "source" | "target" },
+  runtimeConfig: PgRuntimeConfigApi = getDefaultRuntimeConfig(),
 ): Promise<{ pool: Pool; close: () => Promise<void> }> {
-  const sslConfig = await parseSslConfig(url, options?.label ?? "target");
-  const pool = createPool(sslConfig.cleanedUrl, {
-    ...(sslConfig.ssl !== undefined ? { ssl: sslConfig.ssl } : {}),
-    onError: (err: Error & { code?: string }) => {
-      if (err.code !== "57P01") {
-        logger.error("Pool error for {label} connection", {
-          label: options?.label ?? "target",
-          error: err,
-        });
-      }
+  const sslConfig = await parseSslConfig(
+    url,
+    options?.label ?? "target",
+    runtimeConfig,
+  );
+  const pool = createPool(
+    sslConfig.cleanedUrl,
+    {
+      ...(sslConfig.ssl !== undefined ? { ssl: sslConfig.ssl } : {}),
+      onError: (err: Error & { code?: string }) => {
+        if (err.code !== "57P01") {
+          logger.error("Pool error for {label} connection", {
+            label: options?.label ?? "target",
+            error: err,
+          });
+        }
+      },
+      onConnect: async (client) => {
+        await client.query("SET search_path = ''");
+        if (options?.role) {
+          await client.query(`SET ROLE ${escapeIdentifier(options.role)}`);
+        }
+      },
     },
-    onConnect: async (client) => {
-      await client.query("SET search_path = ''");
-      if (options?.role) {
-        await client.query(`SET ROLE ${escapeIdentifier(options.role)}`);
-      }
-    },
-  });
+    runtimeConfig,
+  );
 
   // Eagerly validate connectivity so SSL/auth failures surface immediately
   // instead of hanging on the first real query. node-pg's connectionTimeoutMillis
   // is not reliably enforced under Bun when SSL negotiation hangs.
   const label = options?.label ?? "target";
-  const timeoutMs = DEFAULT_CONNECT_TIMEOUT_MS;
+  const timeoutMs = runtimeConfig.connectTimeoutMs;
   try {
     const client = await Promise.race([
       pool.connect(),

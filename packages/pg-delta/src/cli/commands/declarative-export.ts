@@ -27,7 +27,11 @@ import {
 } from "../utils/export-display.ts";
 import { loadIntegrationDSL } from "../utils/integrations.ts";
 import { isPostgresUrl, loadCatalogFromFile } from "../utils/resolve-input.ts";
-import { parseJsonEffect } from "../utils.ts";
+import {
+  deserializeCatalogSnapshotEffect,
+  parseJsonEffect,
+  tryCliPromise,
+} from "../utils.ts";
 
 const source = Flag.string("source").pipe(
   Flag.withAlias("s"),
@@ -141,7 +145,8 @@ export const declarativeExportCommand = Command.make(
   },
   (args) =>
     Effect.gen(function* () {
-      const { compileSerializeDSL } = yield* Effect.promise(
+      const { compileSerializeDSL } = yield* tryCliPromise(
+        "Error loading serialize DSL support",
         () => import("../../core/integrations/serialize/dsl.ts"),
       );
 
@@ -190,8 +195,9 @@ export const declarativeExportCommand = Command.make(
         serializeParsed;
       let integrationEmptyCatalog: CatalogSnapshot | undefined;
       if (integrationValue) {
-        const integrationDSL = yield* Effect.promise(() =>
-          loadIntegrationDSL(integrationValue),
+        const integrationDSL = yield* tryCliPromise(
+          "Error loading integration",
+          () => loadIntegrationDSL(integrationValue),
         );
         filterOption = filterOption ?? integrationDSL.filter;
         serializeOption = serializeOption ?? integrationDSL.serialize;
@@ -202,21 +208,24 @@ export const declarativeExportCommand = Command.make(
       if (sourceValue) {
         resolvedSource = isPostgresUrl(sourceValue)
           ? sourceValue
-          : yield* Effect.promise(() => loadCatalogFromFile(sourceValue));
+          : yield* tryCliPromise("Error loading source catalog", () =>
+              loadCatalogFromFile(sourceValue),
+            );
       } else if (integrationEmptyCatalog) {
-        const { deserializeCatalog } = yield* Effect.promise(
-          () => import("../../core/catalog.snapshot.ts"),
+        resolvedSource = yield* deserializeCatalogSnapshotEffect(
+          integrationEmptyCatalog,
         );
-        resolvedSource = deserializeCatalog(integrationEmptyCatalog);
       } else {
         resolvedSource = null;
       }
 
       const resolvedTarget = isPostgresUrl(args.target)
         ? args.target
-        : yield* Effect.promise(() => loadCatalogFromFile(args.target));
+        : yield* tryCliPromise("Error loading target catalog", () =>
+            loadCatalogFromFile(args.target),
+          );
 
-      const planResult = yield* Effect.promise(() =>
+      const planResult = yield* tryCliPromise("Error creating plan", () =>
         createPlan(resolvedSource, resolvedTarget, {
           filter: filterOption,
           serialize: serializeOption,
@@ -268,8 +277,9 @@ export const declarativeExportCommand = Command.make(
       const outputDir = path.resolve(args.output);
       const applyTip = (dir: string) =>
         `\nTip: To apply this schema to an empty database, run:\n  pgdelta declarative apply --path ${dir} --target <database_url>`;
-      const diff = yield* Effect.promise(() =>
-        computeFileDiff(outputDir, exportOutput.files),
+      const diff = yield* tryCliPromise(
+        "Error comparing output directory",
+        () => computeFileDiff(outputDir, exportOutput.files),
       );
 
       const treeOutput = buildFileTree(
@@ -303,10 +313,12 @@ export const declarativeExportCommand = Command.make(
       }
 
       if (args.force) {
-        yield* Effect.promise(() =>
+        yield* tryCliPromise("Error clearing output directory", () =>
           rm(outputDir, { recursive: true, force: true }),
         );
-        yield* Effect.promise(() => mkdir(outputDir, { recursive: true }));
+        yield* tryCliPromise("Error recreating output directory", () =>
+          mkdir(outputDir, { recursive: true }),
+        );
       } else if (diff.deleted.length > 0) {
         logWarning(
           `Warning: ${diff.deleted.length} existing file(s) will no longer be present. Use --force to replace the output directory.`,
@@ -316,10 +328,12 @@ export const declarativeExportCommand = Command.make(
       for (const file of exportOutput.files) {
         assertSafePath(file.path, outputDir);
         const filePath = path.join(outputDir, file.path);
-        yield* Effect.promise(() =>
+        yield* tryCliPromise("Error creating export subdirectory", () =>
           mkdir(path.dirname(filePath), { recursive: true }),
         );
-        yield* Effect.promise(() => writeFile(filePath, file.sql));
+        yield* tryCliPromise(`Error writing ${file.path}`, () =>
+          writeFile(filePath, file.sql),
+        );
       }
 
       logSuccess(`Wrote ${exportOutput.files.length} file(s) to ${outputDir}`);

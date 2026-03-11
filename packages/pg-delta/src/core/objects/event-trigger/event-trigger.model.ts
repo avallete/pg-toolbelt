@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const EventTriggerEnabledSchema = Schema.Literals([
@@ -74,7 +77,7 @@ export class EventTrigger extends BasePgModel {
 }
 
 export async function extractEventTriggers(
-  pool: Pool,
+  pool: Queryable,
 ): Promise<EventTrigger[]> {
   const { rows } = await pool.query<EventTriggerProps>(sql`
 with extension_oids as (
@@ -114,7 +117,7 @@ export const extractEventTriggersEffect = (
   db: DatabaseApi,
 ): Effect.Effect<EventTrigger[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractEventTriggers(db.getPool()),
+    try: () => extractEventTriggers(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractEventTriggers failed: ${err instanceof Error ? err.message : err}`,

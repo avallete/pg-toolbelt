@@ -25,9 +25,9 @@ Plan and apply schema changes in one go with confirmation prompt. This is the de
 #### Usage
 
 ```bash
-pg-delta sync --source <source-url> --target <target-url> [options]
+pgdelta sync --source <source-url> --target <target-url> [options]
 # or simply
-pg-delta --source <source-url> --target <target-url> [options]
+pgdelta --source <source-url> --target <target-url> [options]
 ```
 
 #### Options
@@ -46,7 +46,7 @@ pg-delta --source <source-url> --target <target-url> [options]
 **Basic usage:**
 
 ```bash
-pg-delta sync \
+pgdelta sync \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db
 ```
@@ -54,7 +54,7 @@ pg-delta sync \
 **Skip confirmation:**
 
 ```bash
-pg-delta sync \
+pgdelta sync \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db \
   --yes
@@ -63,7 +63,7 @@ pg-delta sync \
 **Use Supabase integration:**
 
 ```bash
-pg-delta sync \
+pgdelta sync \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db \
   --integration supabase
@@ -72,7 +72,7 @@ pg-delta sync \
 **Use custom integration file:**
 
 ```bash
-pg-delta sync \
+pgdelta sync \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db \
   --integration ./my-integration.json
@@ -81,7 +81,7 @@ pg-delta sync \
 **Filter changes:**
 
 ```bash
-pg-delta sync \
+pgdelta sync \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db \
   --filter '{"schema":"public"}'
@@ -104,7 +104,7 @@ Both `--source` and `--target` accept either a PostgreSQL connection URL or a ca
 #### Usage
 
 ```bash
-pg-delta plan --target <target-url-or-snapshot> [options]
+pgdelta plan --target <target-url-or-snapshot> [options]
 ```
 
 #### Options
@@ -125,7 +125,7 @@ pg-delta plan --target <target-url-or-snapshot> [options]
 **Preview changes (tree format):**
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db
 ```
@@ -133,7 +133,7 @@ pg-delta plan \
 **Save plan as JSON:**
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db \
   --output plan.json
@@ -142,7 +142,7 @@ pg-delta plan \
 **Generate SQL script:**
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db \
   --format sql \
@@ -152,7 +152,7 @@ pg-delta plan \
 **Use integration:**
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db \
   --integration supabase \
@@ -162,7 +162,7 @@ pg-delta plan \
 **Offline diff with catalog snapshot:**
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source prod-snapshot.json \
   --target postgresql://user:pass@localhost:5432/staging_db \
   --output migration.sql
@@ -183,7 +183,7 @@ Apply a plan's migration script to a target database.
 #### Usage
 
 ```bash
-pg-delta apply --plan <plan-file> --source <source-url> --target <target-url> [options]
+pgdelta apply --plan <plan-file> --source <source-url> --target <target-url> [options]
 ```
 
 #### Options
@@ -198,7 +198,7 @@ pg-delta apply --plan <plan-file> --source <source-url> --target <target-url> [o
 **Apply a plan:**
 
 ```bash
-pg-delta apply \
+pgdelta apply \
   --plan plan.json \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db
@@ -207,7 +207,7 @@ pg-delta apply \
 **Apply unsafe plan:**
 
 ```bash
-pg-delta apply \
+pgdelta apply \
   --plan plan.json \
   --source postgresql://user:pass@localhost:5432/source_db \
   --target postgresql://user:pass@localhost:5432/target_db \
@@ -230,7 +230,7 @@ Extract the full catalog from a live PostgreSQL database and save it as a JSON s
 #### Usage
 
 ```bash
-pg-delta catalog-export --target <target-url> --output <file> [options]
+pgdelta catalog-export --target <target-url> --output <file> [options]
 ```
 
 #### Options
@@ -244,7 +244,7 @@ pg-delta catalog-export --target <target-url> --output <file> [options]
 **Snapshot a database:**
 
 ```bash
-pg-delta catalog-export \
+pgdelta catalog-export \
   --target postgresql://user:pass@localhost:5432/mydb \
   --output snapshot.json
 ```
@@ -252,7 +252,7 @@ pg-delta catalog-export \
 **Snapshot with a specific role:**
 
 ```bash
-pg-delta catalog-export \
+pgdelta catalog-export \
   --target postgresql://user:pass@prod:5432/mydb \
   --output prod-snapshot.json \
   --role readonly_role
@@ -269,7 +269,7 @@ When `--source` is omitted, all objects from the target database are exported (e
 #### Usage
 
 ```bash
-pg-delta declarative export --target <target-url> --output <dir> [options]
+pgdelta declarative export --target <target-url> --output <dir> [options]
 ```
 
 #### Options
@@ -294,7 +294,7 @@ pg-delta declarative export --target <target-url> --output <dir> [options]
 **Full export:**
 
 ```bash
-pg-delta declarative export \
+pgdelta declarative export \
   --target postgresql://user:pass@localhost:5432/mydb \
   --output ./declarative-schemas/
 ```
@@ -302,7 +302,7 @@ pg-delta declarative export \
 **Export with Supabase integration:**
 
 ```bash
-pg-delta declarative export \
+pgdelta declarative export \
   --target postgresql://user:pass@localhost:5432/mydb \
   --output ./declarative-schemas/ \
   --integration supabase
@@ -311,7 +311,7 @@ pg-delta declarative export \
 **Dry-run preview:**
 
 ```bash
-pg-delta declarative export \
+pgdelta declarative export \
   --target postgresql://user:pass@localhost:5432/mydb \
   --output ./declarative-schemas/ \
   --dry-run
@@ -320,7 +320,7 @@ pg-delta declarative export \
 **Re-export showing only changed files:**
 
 ```bash
-pg-delta declarative export \
+pgdelta declarative export \
   --target postgresql://user:pass@localhost:5432/mydb \
   --output ./declarative-schemas/ \
   --diff-focus
@@ -337,7 +337,7 @@ Function body checks are disabled during rounds to avoid false failures from fun
 #### Usage
 
 ```bash
-pg-delta declarative apply --path <dir-or-file> --target <target-url> [options]
+pgdelta declarative apply --path <dir-or-file> --target <target-url> [options]
 ```
 
 #### Options
@@ -354,7 +354,7 @@ pg-delta declarative apply --path <dir-or-file> --target <target-url> [options]
 **Apply a schema:**
 
 ```bash
-pg-delta declarative apply \
+pgdelta declarative apply \
   --path ./declarative-schemas/ \
   --target postgresql://user:pass@localhost:5432/fresh_db
 ```
@@ -362,7 +362,7 @@ pg-delta declarative apply \
 **Verbose mode:**
 
 ```bash
-pg-delta declarative apply \
+pgdelta declarative apply \
   --path ./declarative-schemas/ \
   --target postgresql://user:pass@localhost:5432/fresh_db \
   --verbose
@@ -371,7 +371,7 @@ pg-delta declarative apply \
 **Skip function validation:**
 
 ```bash
-pg-delta declarative apply \
+pgdelta declarative apply \
   --path ./declarative-schemas/ \
   --target postgresql://user:pass@localhost:5432/fresh_db \
   --no-validate-functions
@@ -380,7 +380,7 @@ pg-delta declarative apply \
 **Debug logging:**
 
 ```bash
-DEBUG=pg-delta:declarative-apply pg-delta declarative apply \
+DEBUG=pg-delta:declarative-apply pgdelta declarative apply \
   --path ./declarative-schemas/ \
   --target postgresql://user:pass@localhost:5432/fresh_db
 ```
@@ -428,11 +428,11 @@ You can also create custom integrations by providing a JSON file. See the integr
 Get help for any command:
 
 ```bash
-pg-delta --help
-pg-delta sync --help
-pg-delta plan --help
-pg-delta apply --help
-pg-delta catalog-export --help
-pg-delta declarative export --help
-pg-delta declarative apply --help
+pgdelta --help
+pgdelta sync --help
+pgdelta plan --help
+pgdelta apply --help
+pgdelta catalog-export --help
+pgdelta declarative export --help
+pgdelta declarative apply --help
 ```

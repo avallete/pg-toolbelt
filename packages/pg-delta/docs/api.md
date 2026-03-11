@@ -41,8 +41,11 @@ if (result) {
 
 ```typescript
 import {
-  createPlan,
   applyPlan,
+  applyPlanEffect,
+  createPlan,
+  createPlanEffect,
+  makeScopedPool,
   type Plan,
   type CreatePlanOptions,
   type IntegrationDSL,
@@ -63,8 +66,8 @@ Create a migration plan by comparing two databases.
 
 #### Parameters
 
-- `source` (string | Sql): Source database connection URL or postgres.js client (current state)
-- `target` (string | Sql): Target database connection URL or postgres.js client (desired state)
+- `source` (`CatalogInput | null`): Source database connection URL, `pg` `Pool`, catalog snapshot, or `null` for an empty baseline
+- `target` (`CatalogInput`): Target database connection URL, `pg` `Pool`, or catalog snapshot
 - `options` (CreatePlanOptions, optional): Configuration options
 
 #### Returns
@@ -101,8 +104,8 @@ Apply a plan's SQL statements to a database with integrity checks. Validates fin
 #### Parameters
 
 - `plan` (Plan): The migration plan to apply
-- `source` (string | Sql): Source database connection URL or postgres.js client
-- `target` (string | Sql): Target database connection URL or postgres.js client
+- `source` (`string | Pool`): Source database connection URL or `pg` `Pool`
+- `target` (`string | Pool`): Target database connection URL or `pg` `Pool`
 - `options` (ApplyPlanOptions, optional): Configuration options
   - `verifyPostApply` (boolean, default: true): Verify fingerprint after applying
 
@@ -149,6 +152,35 @@ if (result) {
 ```
 
 ## Types
+
+### Effect-native APIs
+
+The package also exports Effect entrypoints for consumers that want typed
+errors, scoped database resources, and dependency injection.
+
+```typescript
+import { Effect } from "effect";
+import {
+  applyPlanEffect,
+  createPlanEffect,
+  DatabaseService,
+  makeScopedPool,
+} from "@supabase/pg-delta";
+
+const result = await Effect.scoped(
+  Effect.gen(function* () {
+    const source = yield* makeScopedPool(sourceUrl, { label: "source" });
+    const target = yield* makeScopedPool(targetUrl, { label: "target" });
+
+    const plan = yield* createPlanEffect(source.getPool(), target.getPool());
+    if (!plan) {
+      return null;
+    }
+
+    return yield* applyPlanEffect(plan.plan, source.getPool(), target.getPool());
+  }),
+).pipe(Effect.runPromise);
+```
 
 ### `Plan`
 

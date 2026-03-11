@@ -1,9 +1,12 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { extractVersion } from "../../context.ts";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 /**
@@ -103,7 +106,7 @@ export class Collation extends BasePgModel {
   }
 }
 
-export async function extractCollations(pool: Pool): Promise<Collation[]> {
+export async function extractCollations(pool: Queryable): Promise<Collation[]> {
   const version = await extractVersion(pool);
   const isPostgres17OrGreater = version >= 170000;
   const isPostgres16OrGreater = version >= 160000;
@@ -232,7 +235,7 @@ export const extractCollationsEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Collation[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractCollations(db.getPool()),
+    try: () => extractCollations(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractCollations failed: ${err instanceof Error ? err.message : err}`,

@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../../errors.ts";
-import type { DatabaseApi } from "../../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../../services/database.ts";
 import {
   BasePgModel,
   columnPropsSchema,
@@ -139,7 +142,7 @@ export class CompositeType extends BasePgModel implements TableLikeObject {
 }
 
 export async function extractCompositeTypes(
-  pool: Pool,
+  pool: Queryable,
 ): Promise<CompositeType[]> {
   const { rows: compositeTypeRows } = await pool.query<CompositeTypeProps>(sql`
       WITH extension_oids AS (
@@ -262,7 +265,7 @@ export const extractCompositeTypesEffect = (
   db: DatabaseApi,
 ): Effect.Effect<CompositeType[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractCompositeTypes(db.getPool()),
+    try: () => extractCompositeTypes(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractCompositeTypes failed: ${err instanceof Error ? err.message : err}`,

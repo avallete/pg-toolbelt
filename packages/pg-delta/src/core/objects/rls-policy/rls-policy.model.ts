@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const RlsPolicyCommandSchema = Schema.Literals([
@@ -82,7 +85,9 @@ export class RlsPolicy extends BasePgModel {
   }
 }
 
-export async function extractRlsPolicies(pool: Pool): Promise<RlsPolicy[]> {
+export async function extractRlsPolicies(
+  pool: Queryable,
+): Promise<RlsPolicy[]> {
   const { rows: policyRows } = await pool.query<RlsPolicyProps>(sql`
 with extension_policy_oids as (
   select
@@ -148,7 +153,7 @@ export const extractRlsPoliciesEffect = (
   db: DatabaseApi,
 ): Effect.Effect<RlsPolicy[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractRlsPolicies(db.getPool()),
+    try: () => extractRlsPolicies(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractRlsPolicies failed: ${err instanceof Error ? err.message : err}`,

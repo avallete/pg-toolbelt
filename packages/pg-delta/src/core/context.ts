@@ -1,9 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect } from "effect";
-import type { Pool } from "pg";
 import type { Catalog } from "./catalog.model.ts";
 import type { CatalogExtractionError } from "./errors.ts";
-import type { DatabaseApi } from "./services/database.ts";
+import type { DatabaseApi, Queryable } from "./services/database.ts";
 
 /**
  * Context for diff operations, containing both source and target catalogs.
@@ -13,7 +12,7 @@ export interface DiffContext {
   branchCatalog: Catalog;
 }
 
-export async function extractVersion(pool: Pool) {
+export async function extractVersion(pool: Queryable) {
   const { rows } = await pool.query<{ version: number }>(
     sql`select current_setting('server_version_num')::int as version`,
   );
@@ -21,7 +20,7 @@ export async function extractVersion(pool: Pool) {
   return rows[0].version;
 }
 
-export async function extractCurrentUser(pool: Pool) {
+export async function extractCurrentUser(pool: Queryable) {
   const { rows } = await pool.query<{ current_user: string }>(
     sql`select quote_ident(current_user) as current_user`,
   );

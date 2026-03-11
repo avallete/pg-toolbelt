@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { Effect, FileSystem } from "effect";
+import { WorkingDirectory } from "../services/working-directory.ts";
 
 type DiscoveryResult = {
   files: string[];
@@ -27,14 +28,18 @@ const readSqlFilesInDirectory = async (
   }
 };
 
+const resolveFromWorkingDirectory = (cwd: string, inputPath: string): string =>
+  path.resolve(cwd, inputPath);
+
 export const discoverSqlFiles = async (
   roots: string[],
+  cwd: string,
 ): Promise<DiscoveryResult> => {
   const files = new Set<string>();
   const missingRoots: string[] = [];
 
   for (const inputRoot of roots) {
-    const resolvedRoot = path.resolve(inputRoot);
+    const resolvedRoot = resolveFromWorkingDirectory(cwd, inputRoot);
     let rootStats: Awaited<ReturnType<typeof stat>> | undefined;
     try {
       rootStats = await stat(resolvedRoot);
@@ -92,14 +97,22 @@ const readSqlFilesInDirectoryEffect = (
 
 export const discoverSqlFilesEffect = (
   roots: string[],
-): Effect.Effect<DiscoveryResult, never, FileSystem.FileSystem> =>
+): Effect.Effect<
+  DiscoveryResult,
+  never,
+  FileSystem.FileSystem | WorkingDirectory
+> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
+    const workingDirectory = yield* WorkingDirectory;
     const files = new Set<string>();
     const missingRoots: string[] = [];
 
     for (const inputRoot of roots) {
-      const resolvedRoot = path.resolve(inputRoot);
+      const resolvedRoot = resolveFromWorkingDirectory(
+        workingDirectory.cwd,
+        inputRoot,
+      );
       const exists = yield* fs
         .exists(resolvedRoot)
         .pipe(Effect.orElseSucceed(() => false));

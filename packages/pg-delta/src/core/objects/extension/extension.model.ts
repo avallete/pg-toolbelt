@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 /**
@@ -79,7 +82,7 @@ export class Extension extends BasePgModel {
 }
 
 // TODO: fetch extension dependencies so we can determine when to use CASCADE on creation
-export async function extractExtensions(pool: Pool): Promise<Extension[]> {
+export async function extractExtensions(pool: Queryable): Promise<Extension[]> {
   const { rows: extensionRows } = await pool.query<ExtensionProps>(sql`
   with extension_rows as (
     select
@@ -288,7 +291,7 @@ export const extractExtensionsEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Extension[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractExtensions(db.getPool()),
+    try: () => extractExtensions(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractExtensions failed: ${err instanceof Error ? err.message : err}`,

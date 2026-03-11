@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { analyzeAndSortEffect } from "../src/analyze-and-sort.ts";
-import { ParseError } from "../src/errors.ts";
+import { ParseError, ValidationError } from "../src/errors.ts";
 import type { Diagnostic } from "../src/model/types.ts";
 import { ParserService } from "../src/services/parser.ts";
 import { ParserServiceLive } from "../src/services/parser-live.ts";
+import {
+  validateSqlSyntax,
+  validateSqlSyntaxEffect,
+} from "../src/validate-sql.ts";
 
 describe("ParserService", () => {
   test("ParserServiceLive loads and parses SQL", async () => {
@@ -77,5 +81,24 @@ describe("ParserService", () => {
     expect(result.diagnostics.some((d) => d.code === "DISCOVERY_ERROR")).toBe(
       true,
     );
+  });
+
+  test("validateSqlSyntax rejects invalid SQL", async () => {
+    await expect(validateSqlSyntax("CREATE TABLE")).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+  });
+
+  test("validateSqlSyntaxEffect fails with ValidationError for invalid SQL", async () => {
+    const result = await validateSqlSyntaxEffect("CREATE TABLE").pipe(
+      Effect.provide(ParserServiceLive),
+      Effect.result,
+      Effect.runPromise,
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("ValidationError");
+    }
   });
 });

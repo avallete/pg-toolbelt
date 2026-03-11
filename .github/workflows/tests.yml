@@ -298,7 +298,7 @@ jobs:
           retention-days: 1
           include-hidden-files: true
 
-  deno2-library-e2e:
+  multi-runtime-e2e:
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.user.login != 'supabase-releaser[bot]' &&
@@ -308,19 +308,13 @@ jobs:
       )
     needs:
       - detect-changes
-    name: "Deno 2: Library golden path e2e"
+    name: "Multi-runtime e2e (Node, Bun, Deno)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Setup
-        uses: ./.github/actions/setup
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-      - name: Run Deno e2e golden-path check
-        run: node .github/scripts/deno-library-e2e.mjs
+      - name: Run multi-runtime e2e
+        run: ./scripts/e2e-docker.sh
 
   release-preview:
     needs:
@@ -331,7 +325,7 @@ jobs:
       - pg-delta-integration-pg15-compat
       - pg-delta-integration-pg17-compat
       - pg-topo-tests
-      - deno2-library-e2e
+      - multi-runtime-e2e
     if: always() && !cancelled()
     name: Release preview
     runs-on: ubuntu-latest

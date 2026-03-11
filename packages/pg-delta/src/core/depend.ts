@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema as EffectSchema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "./errors.ts";
-import type { DatabaseApi } from "./services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "./services/database.ts";
 
 /**
  * Dependency type as defined in PostgreSQL's pg_depend.deptype.
@@ -44,7 +47,7 @@ export type PgDepend = typeof PgDependSchema.Type;
  *  - membership:<role>-><member> -> role:<member>
  */
 async function extractPrivilegeAndMembershipDepends(
-  pool: Pool,
+  pool: Queryable,
 ): Promise<PgDepend[]> {
   const { rows } = await pool.query<PgDepend>(sql`
 with
@@ -511,7 +514,7 @@ where dependent_stable_id <> referenced_stable_id
  * @param params - Object containing arrays of OIDs for filtering (user_oids, user_namespace_oids, etc.)
  * @returns Array of dependency objects with class names.
  */
-export async function extractDepends(pool: Pool): Promise<PgDepend[]> {
+export async function extractDepends(pool: Queryable): Promise<PgDepend[]> {
   const { rows: dependsRows } = await pool.query<PgDepend>(sql`
   WITH ids AS (
     -- only the objects that actually show up in dependencies (both sides)
@@ -1880,7 +1883,7 @@ export const extractDependsEffect = (
   db: DatabaseApi,
 ): Effect.Effect<PgDepend[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractDepends(db.getPool()),
+    try: () => extractDepends(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractDepends failed: ${err instanceof Error ? err.message : err}`,

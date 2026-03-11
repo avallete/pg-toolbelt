@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const publicationTablePropsSchema = Schema.Struct({
@@ -126,7 +129,9 @@ export class Publication extends BasePgModel {
 /**
  * Extract all logical replication publications from the database.
  */
-export async function extractPublications(pool: Pool): Promise<Publication[]> {
+export async function extractPublications(
+  pool: Queryable,
+): Promise<Publication[]> {
   const { rows } = await pool.query<PublicationProps>(sql`
       with extension_oids as (
         select objid
@@ -215,7 +220,7 @@ export const extractPublicationsEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Publication[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractPublications(db.getPool()),
+    try: () => extractPublications(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractPublications failed: ${err instanceof Error ? err.message : err}`,

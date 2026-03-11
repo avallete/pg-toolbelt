@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const TableRelkindSchema = Schema.Literals([
@@ -206,7 +209,7 @@ export class Index extends BasePgModel {
   }
 }
 
-export async function extractIndexes(pool: Pool): Promise<Index[]> {
+export async function extractIndexes(pool: Queryable): Promise<Index[]> {
   const { rows: indexRows } = await pool.query<IndexProps>(sql`
       with extension_oids as (
         select objid
@@ -378,7 +381,7 @@ export const extractIndexesEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Index[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractIndexes(db.getPool()),
+    try: () => extractIndexes(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractIndexes failed: ${err instanceof Error ? err.message : err}`,

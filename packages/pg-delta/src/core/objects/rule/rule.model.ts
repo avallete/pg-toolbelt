@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import { stableId } from "../utils.ts";
 
@@ -103,7 +106,7 @@ export class Rule extends BasePgModel {
   }
 }
 
-export async function extractRules(pool: Pool): Promise<Rule[]> {
+export async function extractRules(pool: Queryable): Promise<Rule[]> {
   const { rows: ruleRows } = await pool.query<RuleProps>(sql`
       WITH extension_rule_oids AS (
         SELECT
@@ -186,7 +189,7 @@ export const extractRulesEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Rule[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractRules(db.getPool()),
+    try: () => extractRules(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractRules failed: ${err instanceof Error ? err.message : err}`,

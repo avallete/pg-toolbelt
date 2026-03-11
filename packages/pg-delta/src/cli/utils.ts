@@ -4,6 +4,7 @@
 
 import chalk from "chalk";
 import { Effect } from "effect";
+import { deserializeCatalog } from "../core/catalog.snapshot.ts";
 import type { Change } from "../core/change.types.ts";
 import type { DiffContext } from "../core/context.ts";
 import { groupChangesHierarchically } from "../core/plan/hierarchy.ts";
@@ -29,6 +30,35 @@ export const parseJsonEffect = <T>(
       new CliExitError({
         exitCode: 1,
         message: `Invalid ${label} JSON: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+  });
+
+/**
+ * Wrap a Promise-returning CLI operation and normalize thrown errors into a
+ * tagged CLI exit error with a user-facing message.
+ */
+export const tryCliPromise = <T>(
+  label: string,
+  operation: () => Promise<T>,
+): Effect.Effect<T, CliExitError> =>
+  Effect.tryPromise({
+    try: operation,
+    catch: (error) =>
+      new CliExitError({
+        exitCode: 1,
+        message: `${label}: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+  });
+
+export const deserializeCatalogSnapshotEffect = (
+  snapshot: unknown,
+): Effect.Effect<ReturnType<typeof deserializeCatalog>, CliExitError> =>
+  Effect.try({
+    try: () => deserializeCatalog(snapshot),
+    catch: (error) =>
+      new CliExitError({
+        exitCode: 1,
+        message: `Error deserializing catalog: ${error instanceof Error ? error.message : String(error)}`,
       }),
   });
 
@@ -143,34 +173,50 @@ export function formatPlanForDisplay(
 }
 
 /**
- * Validates plan risk and handles unsafe operations.
- * Returns validation result with optional exit code.
+ * Validate whether a plan may proceed without side effects. Commands own the
+ * final user-facing output so they can surface warnings once without the helper
+ * also logging and forcing duplicate messages through the CLI boundary.
  */
 export function validatePlanRisk(
   plan: Plan,
   unsafe: boolean,
   options?: { suppressWarning?: boolean },
-): { valid: boolean; exitCode?: number } {
+):
+  | { valid: true }
+  | {
+      valid: false;
+      exitCode: number;
+      message: string;
+      warning?: {
+        title: string;
+        statements: string[];
+        suggestion: string;
+      };
+    } {
   if (!unsafe) {
     if (!plan.risk) {
-      logError(
-        "Plan is missing risk metadata. Regenerate the plan with the current pgdelta or re-run with --unsafe to apply anyway.",
-      );
-      return { valid: false, exitCode: 1 };
+      return {
+        valid: false,
+        exitCode: 1,
+        message:
+          "Plan is missing risk metadata. Regenerate the plan with the current pgdelta or re-run with --unsafe to apply anyway.",
+      };
     }
     const risk = plan.risk;
     if (risk.level === "data_loss") {
-      if (!options?.suppressWarning) {
-        const warningLines = [
-          chalk.yellow("⚠ Data-loss operations detected:"),
-          ...risk.statements.map((statement: string) =>
-            chalk.yellow(`- ${statement}`),
-          ),
-          chalk.yellow("Use `--unsafe` to allow applying these operations."),
-        ];
-        logWarning(warningLines.join("\n"));
-      }
-      return { valid: false, exitCode: 1 };
+      return {
+        valid: false,
+        exitCode: 1,
+        message:
+          "Data-loss operations detected. Re-run with --unsafe to allow applying this plan.",
+        warning: options?.suppressWarning
+          ? undefined
+          : {
+              title: "Data-loss operations detected:",
+              statements: risk.statements,
+              suggestion: "Use `--unsafe` to allow applying these operations.",
+            },
+      };
     }
   }
   return { valid: true };

@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const TriggerEnabledSchema = Schema.Literals([
@@ -151,7 +154,7 @@ export class Trigger extends BasePgModel {
   }
 }
 
-export async function extractTriggers(pool: Pool): Promise<Trigger[]> {
+export async function extractTriggers(pool: Queryable): Promise<Trigger[]> {
   const { rows: triggerRows } = await pool.query<TriggerProps>(sql`
       with extension_trigger_oids as (
         select objid
@@ -272,7 +275,7 @@ export const extractTriggersEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Trigger[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractTriggers(db.getPool()),
+    try: () => extractTriggers(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractTriggers failed: ${err instanceof Error ? err.message : err}`,

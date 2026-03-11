@@ -2,8 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PG_DELTA_PKG="$REPO_ROOT/packages/pg-delta/package.json"
 
-echo "=== Step 1: Run Deno e2e with fixed package.json (should PASS) ==="
-node "$REPO_ROOT/.github/scripts/deno-library-e2e.mjs"
-echo "PASS: Deno e2e succeeded with fixed dependency."
+echo "=== Run multi-runtime e2e (Node, Bun, Deno) ==="
+"$REPO_ROOT/scripts/e2e-docker.sh"
+echo "PASS: Multi-runtime e2e succeeded."

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { CatalogExtractionError } from "../errors.ts";
-import type { DatabaseApi } from "./database.ts";
+import { extractSchemasEffect } from "../objects/schema/schema.model.ts";
+import { asQueryable, type DatabaseApi } from "./database.ts";
 
 describe("DatabaseApi mock", () => {
   test("can mock query responses", async () => {
@@ -53,5 +54,50 @@ describe("DatabaseApi mock", () => {
       Effect.runPromise,
     );
     expect(result.rows[0].id).toBe(99);
+  });
+
+  test("asQueryable adapts query objects without pretending to be a full pool", async () => {
+    const MockDb = {
+      query: (_sql: string, values?: unknown[]) =>
+        Effect.succeed({
+          rows: [{ id: values?.[0] ?? 1 }],
+          rowCount: 1,
+        }),
+      getPool: () => {
+        throw new Error("no pool in mock");
+      },
+    } as unknown as DatabaseApi;
+
+    const result = await asQueryable(MockDb).query<{ id: number }>({
+      text: "SELECT $1",
+      values: [7],
+    });
+
+    expect(result.rows[0].id).toBe(7);
+  });
+
+  test("Effect extractors can run against query-only mocks", async () => {
+    const MockDb = {
+      query: () =>
+        Effect.succeed({
+          rows: [
+            {
+              name: "public",
+              owner: "postgres",
+              comment: "standard public schema",
+              privileges: [],
+            },
+          ],
+          rowCount: 1,
+        }),
+      getPool: () => {
+        throw new Error("extractor should not need a raw pool");
+      },
+    } as unknown as DatabaseApi;
+
+    const schemas = await extractSchemasEffect(MockDb).pipe(Effect.runPromise);
+
+    expect(schemas).toHaveLength(1);
+    expect(schemas[0].stableId).toBe("schema:public");
   });
 });

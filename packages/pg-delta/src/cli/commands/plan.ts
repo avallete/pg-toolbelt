@@ -16,7 +16,12 @@ import { ChangesDetected } from "../errors.ts";
 import { logInfo, writeOutput } from "../ui.ts";
 import { loadIntegrationDSL } from "../utils/integrations.ts";
 import { isPostgresUrl, loadCatalogFromFile } from "../utils/resolve-input.ts";
-import { formatPlanForDisplay, parseJsonEffect } from "../utils.ts";
+import {
+  deserializeCatalogSnapshotEffect,
+  formatPlanForDisplay,
+  parseJsonEffect,
+  tryCliPromise,
+} from "../utils.ts";
 
 const source = Flag.string("source").pipe(
   Flag.withAlias("s"),
@@ -134,8 +139,9 @@ export const planCommand = Command.make(
         | import("../../core/catalog.snapshot.ts").CatalogSnapshot
         | undefined;
       if (integrationValue) {
-        const integrationDSL = yield* Effect.promise(() =>
-          loadIntegrationDSL(integrationValue),
+        const integrationDSL = yield* tryCliPromise(
+          "Error loading integration",
+          () => loadIntegrationDSL(integrationValue),
         );
         filterOption = filterOption ?? integrationDSL.filter;
         serializeOption = serializeOption ?? integrationDSL.serialize;
@@ -146,21 +152,24 @@ export const planCommand = Command.make(
       if (sourceValue) {
         resolvedSource = isPostgresUrl(sourceValue)
           ? sourceValue
-          : yield* Effect.promise(() => loadCatalogFromFile(sourceValue));
+          : yield* tryCliPromise("Error loading source catalog", () =>
+              loadCatalogFromFile(sourceValue),
+            );
       } else if (integrationEmptyCatalog) {
-        const { deserializeCatalog } = yield* Effect.promise(
-          () => import("../../core/catalog.snapshot.ts"),
+        resolvedSource = yield* deserializeCatalogSnapshotEffect(
+          integrationEmptyCatalog,
         );
-        resolvedSource = deserializeCatalog(integrationEmptyCatalog);
       } else {
         resolvedSource = null;
       }
 
       const resolvedTarget = isPostgresUrl(args.target)
         ? args.target
-        : yield* Effect.promise(() => loadCatalogFromFile(args.target));
+        : yield* tryCliPromise("Error loading target catalog", () =>
+            loadCatalogFromFile(args.target),
+          );
 
-      const planResult = yield* Effect.promise(() =>
+      const planResult = yield* tryCliPromise("Error creating plan", () =>
         createPlan(resolvedSource, resolvedTarget, {
           role: roleValue,
           filter: filterOption,
@@ -198,7 +207,9 @@ export const planCommand = Command.make(
       );
 
       if (outputPath) {
-        yield* Effect.promise(() => writeFile(outputPath, content, "utf-8"));
+        yield* tryCliPromise(`Error writing ${label.toLowerCase()}`, () =>
+          writeFile(outputPath, content, "utf-8"),
+        );
         logInfo(`${label} written to ${outputPath}`);
       } else {
         writeOutput(content.endsWith("\n") ? content.trimEnd() : content);

@@ -10,10 +10,17 @@ import type {
   Diagnostic,
 } from "./model/types.ts";
 import type { ParserService } from "./services/parser.ts";
+import { WorkingDirectory } from "./services/working-directory.ts";
 
-const computeCommonBase = async (resolvedRoots: string[]): Promise<string> => {
+const resolveRoots = (roots: string[], cwd: string): string[] =>
+  roots.map((root) => path.resolve(cwd, root));
+
+const computeCommonBase = async (
+  resolvedRoots: string[],
+  cwd: string,
+): Promise<string> => {
   if (resolvedRoots.length === 0) {
-    return process.cwd();
+    return cwd;
   }
 
   // Normalise each root to its directory (file roots use their parent)
@@ -65,7 +72,8 @@ export const analyzeAndSortFromFiles = async (
     };
   }
 
-  const discovery = await discoverSqlFiles(roots);
+  const cwd = globalThis.process?.cwd?.() ?? "";
+  const discovery = await discoverSqlFiles(roots, cwd);
   const discoveryDiagnostics: Diagnostic[] = [];
 
   for (const missingRoot of discovery.missingRoots) {
@@ -75,8 +83,8 @@ export const analyzeAndSortFromFiles = async (
     });
   }
 
-  const resolvedRoots = roots.map((r) => path.resolve(r));
-  const basePath = await computeCommonBase(resolvedRoots);
+  const resolvedRoots = resolveRoots(roots, cwd);
+  const basePath = await computeCommonBase(resolvedRoots, cwd);
 
   const sqlContents: string[] = [];
   for (const filePath of discovery.files) {
@@ -150,10 +158,11 @@ export const analyzeAndSortFromFiles = async (
 
 const computeCommonBaseEffect = (
   resolvedRoots: string[],
-): Effect.Effect<string, never, FileSystem.FileSystem> =>
+): Effect.Effect<string, never, FileSystem.FileSystem | WorkingDirectory> =>
   Effect.gen(function* () {
+    const workingDirectory = yield* WorkingDirectory;
     if (resolvedRoots.length === 0) {
-      return process.cwd();
+      return workingDirectory.cwd;
     }
 
     const fs = yield* FileSystem.FileSystem;
@@ -251,7 +260,7 @@ export const analyzeAndSortFromFilesEffect = (
 ): Effect.Effect<
   AnalyzeResult,
   ParseError,
-  ParserService | FileSystem.FileSystem
+  ParserService | FileSystem.FileSystem | WorkingDirectory
 > =>
   Effect.gen(function* () {
     if (roots.length === 0) {
@@ -283,7 +292,8 @@ export const analyzeAndSortFromFilesEffect = (
       });
     }
 
-    const resolvedRoots = roots.map((r) => path.resolve(r));
+    const workingDirectory = yield* WorkingDirectory;
+    const resolvedRoots = resolveRoots(roots, workingDirectory.cwd);
     const basePath = yield* computeCommonBaseEffect(resolvedRoots);
 
     const sqlContents: string[] = [];

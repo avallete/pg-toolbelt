@@ -6,6 +6,7 @@ import {
   logInfo,
   logSuccess,
   logWarning,
+  logWarningBlock,
   promptConfirmation,
   writeOutput,
 } from "./ui.ts";
@@ -14,10 +15,16 @@ interface MockStdioOptions {
   input: string;
   stdinIsTTY?: boolean;
   stdoutIsTTY?: boolean;
+  stderrIsTTY?: boolean;
 }
 
 function withMockStdio(
-  { input, stdinIsTTY = false, stdoutIsTTY = false }: MockStdioOptions,
+  {
+    input,
+    stdinIsTTY = false,
+    stdoutIsTTY = false,
+    stderrIsTTY = false,
+  }: MockStdioOptions,
   fn: () => Promise<unknown>,
 ): {
   run: () => Promise<void>;
@@ -29,7 +36,7 @@ function withMockStdio(
   const fakeStderr = new PassThrough();
   (fakeStdin as unknown as { isTTY?: boolean }).isTTY = stdinIsTTY;
   (fakeStdout as unknown as { isTTY?: boolean }).isTTY = stdoutIsTTY;
-  (fakeStderr as unknown as { isTTY?: boolean }).isTTY = false;
+  (fakeStderr as unknown as { isTTY?: boolean }).isTTY = stderrIsTTY;
 
   let stdoutOutput = "";
   let stderrOutput = "";
@@ -115,6 +122,33 @@ describe("output routing", () => {
     expect(mock.getStderrOutput()).toBe(
       "No changes detected.\nWrote file.\nCareful.\nFailed.\n",
     );
+  });
+
+  test("renders warning blocks through stderr in non-interactive mode", async () => {
+    const mock = withMockStdio({ input: "" }, async () => {
+      logWarningBlock([
+        "Data-loss operations detected:",
+        "- DROP TABLE users",
+        "Use `--unsafe` to allow applying these operations.",
+      ]);
+    });
+
+    await mock.run();
+
+    expect(mock.getStdoutOutput()).toBe("");
+    expect(mock.getStderrOutput()).toBe(
+      "Data-loss operations detected:\n- DROP TABLE users\nUse `--unsafe` to allow applying these operations.\n",
+    );
+  });
+
+  test("keeps ANSI styling for warnings when stderr is a terminal", async () => {
+    const mock = withMockStdio({ input: "", stderrIsTTY: true }, async () => {
+      logWarningBlock(["Data-loss operations detected:", "- DROP TABLE users"]);
+    });
+
+    await mock.run();
+
+    expect(mock.getStderrOutput()).toContain("\u001b[");
   });
 });
 

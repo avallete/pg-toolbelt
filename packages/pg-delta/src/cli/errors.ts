@@ -2,7 +2,8 @@ import { Data } from "effect";
 
 /**
  * Typed CLI exit error — commands fail with this to signal a non-zero exit code.
- * The CLI runner catches it at the boundary and sets `process.exitCode`.
+ * The CLI runner catches it at the boundary and delegates exit handling through
+ * the runtime layer, keeping command code independent from direct host globals.
  *
  * Every instance **must** carry a descriptive message — never use `message: ""`.
  */

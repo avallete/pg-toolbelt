@@ -1,5 +1,11 @@
 import { createInterface } from "node:readline/promises";
 import * as clack from "@clack/prompts";
+import { Chalk } from "chalk";
+import {
+  getRuntimeStdio,
+  isInteractiveTerminal,
+  shouldStyleStderr,
+} from "./runtime.ts";
 
 const NON_INTERACTIVE_CONFIRM_TIMEOUT_MS = 1_000;
 
@@ -9,10 +15,7 @@ function isAffirmativeResponse(value: string): boolean {
 }
 
 async function confirmFromStdin(message: string): Promise<boolean> {
-  const stdin = process.stdin as NodeJS.ReadableStream & {
-    isTTY?: boolean;
-  };
-  const stdout = process.stdout;
+  const { stdin, stdout } = getRuntimeStdio();
   const rl = createInterface({
     input: stdin,
     output: stdout,
@@ -45,47 +48,53 @@ function writeLine(stream: NodeJS.WritableStream, message: string): void {
 }
 
 export function writeOutput(message: string): void {
-  writeLine(process.stdout, message);
+  writeLine(getRuntimeStdio().stdout, message);
 }
 
-function isInteractiveCli(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY && !clack.isCI());
+function styleWarning(message: string): string {
+  return new Chalk({ level: shouldStyleStderr() ? 1 : 0 }).yellow(message);
 }
 
 export function logInfo(message: string): void {
-  if (isInteractiveCli()) {
+  if (isInteractiveTerminal()) {
     clack.log.info(message);
     return;
   }
-  writeLine(process.stderr, message);
+  writeLine(getRuntimeStdio().stderr, message);
 }
 
 export function logSuccess(message: string): void {
-  if (isInteractiveCli()) {
+  if (isInteractiveTerminal()) {
     clack.log.success(message);
     return;
   }
-  writeLine(process.stderr, message);
+  writeLine(getRuntimeStdio().stderr, message);
 }
 
 export function logWarning(message: string): void {
-  if (isInteractiveCli()) {
+  if (isInteractiveTerminal()) {
     clack.log.warn(message);
     return;
   }
-  writeLine(process.stderr, message);
+  writeLine(getRuntimeStdio().stderr, styleWarning(message));
 }
 
 export function logError(message: string): void {
-  if (isInteractiveCli()) {
+  if (isInteractiveTerminal()) {
     clack.log.error(message);
     return;
   }
-  writeLine(process.stderr, message);
+  writeLine(getRuntimeStdio().stderr, message);
+}
+
+export function logWarningBlock(lines: string[]): void {
+  for (const line of lines) {
+    logWarning(line);
+  }
 }
 
 export async function confirmAction(message: string): Promise<boolean> {
-  if (!isInteractiveCli()) {
+  if (!isInteractiveTerminal()) {
     return confirmFromStdin(message);
   }
 

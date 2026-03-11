@@ -35,4 +35,4 @@ assert(
   "pg-delta SQL formatter should emit column definition",
 );
 
-console.log("Deno golden-path e2e passed.");
+console.log("lib-golden-path e2e passed.");

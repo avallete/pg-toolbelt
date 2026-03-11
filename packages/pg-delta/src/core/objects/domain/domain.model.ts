@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -117,7 +120,7 @@ export class Domain extends BasePgModel {
  * @param sql - The SQL client.
  * @returns A list of domains.
  */
-export async function extractDomains(pool: Pool): Promise<Domain[]> {
+export async function extractDomains(pool: Queryable): Promise<Domain[]> {
   const { rows: domainRows } = await pool.query<DomainProps>(sql`
       with extension_oids as (
         select
@@ -197,7 +200,7 @@ export const extractDomainsEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Domain[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractDomains(db.getPool()),
+    try: () => extractDomains(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractDomains failed: ${err instanceof Error ? err.message : err}`,

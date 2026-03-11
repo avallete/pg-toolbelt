@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import {
   BasePgModel,
   columnPropsSchema,
@@ -133,7 +136,7 @@ export class View extends BasePgModel implements TableLikeObject {
   }
 }
 
-export async function extractViews(pool: Pool): Promise<View[]> {
+export async function extractViews(pool: Queryable): Promise<View[]> {
   const { rows: viewRows } = await pool.query<ViewProps>(sql`
 with extension_oids as (
   select
@@ -276,7 +279,7 @@ export const extractViewsEffect = (
   db: DatabaseApi,
 ): Effect.Effect<View[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractViews(db.getPool()),
+    try: () => extractViews(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractViews failed: ${err instanceof Error ? err.message : err}`,

@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../../errors.ts";
-import type { DatabaseApi } from "../../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 import {
   type PrivilegeProps,
@@ -109,7 +112,7 @@ export class Enum extends BasePgModel {
   }
 }
 
-export async function extractEnums(pool: Pool): Promise<Enum[]> {
+export async function extractEnums(pool: Queryable): Promise<Enum[]> {
   const { rows: enumRows } = await pool.query<{
     schema: string;
     name: string;
@@ -201,7 +204,7 @@ export const extractEnumsEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Enum[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractEnums(db.getPool()),
+    try: () => extractEnums(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractEnums failed: ${err instanceof Error ? err.message : err}`,

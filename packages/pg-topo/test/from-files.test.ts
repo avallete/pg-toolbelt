@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import path from "node:path";
 import { analyzeAndSortFromFiles } from "../src/from-files";
+import { discoverSqlFiles } from "../src/ingest/discover.ts";
 import { createTempFixtureHarness } from "./support/temp-fixture";
 
 describe("analyzeAndSortFromFiles", () => {
@@ -79,5 +80,19 @@ describe("analyzeAndSortFromFiles", () => {
     );
     expect(cycleDiag).toBeDefined();
     expect(cycleDiag?.statementId?.filePath).not.toMatch(/^<input:\d+>$/);
+  });
+
+  test("discoverSqlFiles resolves relative roots against the provided cwd", async () => {
+    const fixtureRoot = await harness.createSqlFixture({
+      "nested/schema.sql": "create schema app;",
+    });
+
+    const discovery = await discoverSqlFiles(["nested"], fixtureRoot);
+
+    expect(discovery.missingRoots).toEqual([]);
+    expect(discovery.files).toHaveLength(1);
+    expect(discovery.files[0]).toBe(
+      path.join(fixtureRoot, "nested", "schema.sql"),
+    );
   });
 });

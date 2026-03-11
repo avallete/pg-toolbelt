@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../../errors.ts";
-import type { DatabaseApi } from "../../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 
 /**
@@ -57,7 +60,9 @@ export class UserMapping extends BasePgModel {
   }
 }
 
-export async function extractUserMappings(pool: Pool): Promise<UserMapping[]> {
+export async function extractUserMappings(
+  pool: Queryable,
+): Promise<UserMapping[]> {
   const { rows: mappingRows } = await pool.query<UserMappingProps>(sql`
       select
         case
@@ -105,7 +110,7 @@ export const extractUserMappingsEffect = (
   db: DatabaseApi,
 ): Effect.Effect<UserMapping[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractUserMappings(db.getPool()),
+    try: () => extractUserMappings(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractUserMappings failed: ${err instanceof Error ? err.message : err}`,

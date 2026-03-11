@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../../errors.ts";
-import type { DatabaseApi } from "../../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 import {
   type PrivilegeProps,
@@ -118,7 +121,7 @@ export class Range extends BasePgModel {
  *  - MULTIRANGE_TYPE_NAME is not included (we currently do not attempt to infer
  *    whether it differs from the default auto-generated name)
  */
-export async function extractRanges(pool: Pool): Promise<Range[]> {
+export async function extractRanges(pool: Queryable): Promise<Range[]> {
   const { rows } = await pool.query<RangeProps>(sql`
 with extension_oids as (
   select objid from pg_depend d
@@ -197,7 +200,7 @@ export const extractRangesEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Range[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractRanges(db.getPool()),
+    try: () => extractRanges(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractRanges failed: ${err instanceof Error ? err.message : err}`,

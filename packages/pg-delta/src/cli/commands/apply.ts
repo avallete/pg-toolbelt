@@ -8,7 +8,13 @@ import { Command, Flag } from "effect/unstable/cli";
 import { applyPlan } from "../../core/plan/apply.ts";
 import { deserializePlan, type Plan } from "../../core/plan/index.ts";
 import { CliExitError } from "../errors.ts";
-import { handleApplyResult, validatePlanRisk } from "../utils.ts";
+import { setExitCode } from "../runtime.ts";
+import { logWarningBlock } from "../ui.ts";
+import {
+  handleApplyResult,
+  tryCliPromise,
+  validatePlanRisk,
+} from "../utils.ts";
 
 const plan = Flag.string("plan").pipe(
   Flag.withAlias("p"),
@@ -56,16 +62,25 @@ export const applyCommand = Command.make(
 
       const validation = validatePlanRisk(parsedPlan, args.unsafe);
       if (!validation.valid) {
+        const warning = validation.warning;
+        if (warning) {
+          yield* Effect.sync(() => {
+            logWarningBlock([
+              warning.title,
+              ...warning.statements.map((statement) => `- ${statement}`),
+              warning.suggestion,
+            ]);
+          });
+        }
         return yield* Effect.fail(
           new CliExitError({
-            exitCode: validation.exitCode ?? 1,
-            message:
-              "Plan blocked: unsafe operations require the --unsafe flag",
+            exitCode: validation.exitCode,
+            message: validation.message,
           }),
         );
       }
 
-      const result = yield* Effect.promise(() =>
+      const result = yield* tryCliPromise("Error applying plan", () =>
         applyPlan(parsedPlan, args.source, args.target, {
           verifyPostApply: true,
         }),
@@ -73,9 +88,10 @@ export const applyCommand = Command.make(
 
       const { exitCode } = handleApplyResult(result);
       if (exitCode !== 0) {
-        return yield* Effect.fail(
-          new CliExitError({ exitCode, message: "Plan apply failed" }),
-        );
+        yield* Effect.sync(() => {
+          setExitCode(exitCode);
+        });
+        return;
       }
     }),
 );

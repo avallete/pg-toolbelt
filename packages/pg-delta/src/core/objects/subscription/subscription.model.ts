@@ -1,8 +1,11 @@
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { extractVersion } from "../../context.ts";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const subscriptionPropsSchema = Schema.Struct({
@@ -110,7 +113,7 @@ export class Subscription extends BasePgModel {
 }
 
 export async function extractSubscriptions(
-  pool: Pool,
+  pool: Queryable,
 ): Promise<Subscription[]> {
   const version = await extractVersion(pool);
   const isPostgres16OrGreater = version >= 160000;
@@ -200,7 +203,7 @@ export const extractSubscriptionsEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Subscription[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractSubscriptions(db.getPool()),
+    try: () => extractSubscriptions(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractSubscriptions failed: ${err instanceof Error ? err.message : err}`,

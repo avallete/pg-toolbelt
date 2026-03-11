@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../../errors.ts";
-import type { DatabaseApi } from "../../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 import {
   type PrivilegeProps,
@@ -81,7 +84,7 @@ export class Server extends BasePgModel {
   }
 }
 
-export async function extractServers(pool: Pool): Promise<Server[]> {
+export async function extractServers(pool: Queryable): Promise<Server[]> {
   const { rows: serverRows } = await pool.query<ServerProps>(sql`
       select
         quote_ident(srv.srvname) as name,
@@ -142,7 +145,7 @@ export const extractServersEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Server[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractServers(db.getPool()),
+    try: () => extractServers(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractServers failed: ${err instanceof Error ? err.message : err}`,

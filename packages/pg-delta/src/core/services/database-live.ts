@@ -1,4 +1,4 @@
-import { Effect, type Scope } from "effect";
+import { Effect, Option, Schedule, type Scope } from "effect";
 import type { Pool } from "pg";
 import { escapeIdentifier } from "pg";
 import {
@@ -9,10 +9,14 @@ import {
 } from "../errors.ts";
 import { parseSslConfig } from "../plan/ssl-config.ts";
 import { createPool, endPool } from "../postgres-config.ts";
+import {
+  makePgRuntimeConfigLayer,
+  PgRuntimeConfigService,
+} from "../runtime-config.ts";
 import type { DatabaseApi } from "./database.ts";
 
-const DEFAULT_CONNECT_TIMEOUT_MS =
-  Number(process.env.PGDELTA_CONNECT_TIMEOUT_MS) || 2_500;
+const CONNECT_RETRY_BASE_DELAY = "50 millis";
+const CONNECT_RETRY_TIMES = 2;
 
 /**
  * Create a DatabaseApi backed by a scoped pg Pool.
@@ -21,20 +25,22 @@ const DEFAULT_CONNECT_TIMEOUT_MS =
  * This replaces the manual try/finally pool cleanup pattern in
  * create.ts and apply.ts.
  */
-export const makeScopedPool = (
+export const makeScopedPoolEffect = (
   url: string,
   options?: { role?: string; label?: "source" | "target" },
 ): Effect.Effect<
   DatabaseApi,
   ConnectionError | ConnectionTimeoutError | SslConfigError,
-  Scope.Scope
+  PgRuntimeConfigService | Scope.Scope
 > =>
   Effect.gen(function* () {
     const label = options?.label ?? "target";
+    const runtimeConfig = yield* PgRuntimeConfigService;
+    const connectTimeoutMs = runtimeConfig.connectTimeoutMs;
 
     // Parse SSL config
     const sslConfig = yield* Effect.tryPromise({
-      try: () => parseSslConfig(url, label),
+      try: () => parseSslConfig(url, label, runtimeConfig),
       catch: (err) =>
         new SslConfigError({
           message: `SSL config failed for ${label}: ${err}`,
@@ -45,59 +51,77 @@ export const makeScopedPool = (
     // Create pool with acquireRelease for automatic cleanup
     const pool = yield* Effect.acquireRelease(
       Effect.sync(() =>
-        createPool(sslConfig.cleanedUrl, {
-          ...(sslConfig.ssl !== undefined ? { ssl: sslConfig.ssl } : {}),
-          onError: (err: Error & { code?: string }) => {
-            if (err.code !== "57P01") {
-              console.error("Pool error:", err);
-            }
+        createPool(
+          sslConfig.cleanedUrl,
+          {
+            ...(sslConfig.ssl !== undefined ? { ssl: sslConfig.ssl } : {}),
+            onError: (err: Error & { code?: string }) => {
+              if (err.code !== "57P01") {
+                console.error("Pool error:", err);
+              }
+            },
+            onConnect: async (client) => {
+              await client.query("SET search_path = ''");
+              if (options?.role) {
+                await client.query(
+                  `SET ROLE ${escapeIdentifier(options.role)}`,
+                );
+              }
+            },
           },
-          onConnect: async (client) => {
-            await client.query("SET search_path = ''");
-            if (options?.role) {
-              await client.query(`SET ROLE ${escapeIdentifier(options.role)}`);
-            }
-          },
-        }),
+          runtimeConfig,
+        ),
       ),
       (pool) => Effect.promise(() => endPool(pool)),
     );
 
-    // Validate connectivity with timeout
-    yield* Effect.tryPromise({
-      try: async () => {
-        const timeoutMs = DEFAULT_CONNECT_TIMEOUT_MS;
-        const client = await Promise.race([
-          pool.connect(),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () =>
-                reject(new Error(`Connection timed out after ${timeoutMs}ms`)),
-              timeoutMs,
-            ),
-          ),
-        ]);
-        client.release();
-      },
-      catch: (err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("timed out")) {
-          return new ConnectionTimeoutError({
-            message: `Connection to ${label} database timed out after ${DEFAULT_CONNECT_TIMEOUT_MS}ms`,
-            label,
-            timeoutMs: DEFAULT_CONNECT_TIMEOUT_MS,
-          });
+    // Validate connectivity before handing the pool to the caller. Retries stay
+    // narrowly scoped to transient connect/timeout failures and never re-run
+    // SSL parsing or pool creation.
+    yield* Effect.retry(
+      Effect.gen(function* () {
+        const connected = yield* Effect.tryPromise({
+          try: async () => {
+            const client = await pool.connect();
+            client.release();
+          },
+          catch: (err) =>
+            new ConnectionError({
+              message: `Failed to connect to ${label} database: ${err instanceof Error ? err.message : String(err)}`,
+              label,
+              cause: err,
+            }),
+        }).pipe(Effect.timeoutOption(connectTimeoutMs));
+
+        if (Option.isNone(connected)) {
+          return yield* Effect.fail(
+            new ConnectionTimeoutError({
+              message: `Connection to ${label} database timed out after ${connectTimeoutMs}ms`,
+              label,
+              timeoutMs: connectTimeoutMs,
+            }),
+          );
         }
-        return new ConnectionError({
-          message: `Failed to connect to ${label} database: ${msg}`,
-          label,
-          cause: err,
-        });
-      },
-    });
+      }),
+      Schedule.exponential(CONNECT_RETRY_BASE_DELAY).pipe(
+        Schedule.compose(Schedule.recurs(CONNECT_RETRY_TIMES)),
+      ),
+    );
 
     return wrapPool(pool);
   });
+
+export const makeScopedPool = (
+  url: string,
+  options?: { role?: string; label?: "source" | "target" },
+): Effect.Effect<
+  DatabaseApi,
+  ConnectionError | ConnectionTimeoutError | SslConfigError,
+  Scope.Scope
+> =>
+  makeScopedPoolEffect(url, options).pipe(
+    Effect.provide(makePgRuntimeConfigLayer()),
+  );
 
 /**
  * Wrap an existing pg Pool as a DatabaseApi (no lifecycle management).

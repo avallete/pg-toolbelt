@@ -1,8 +1,11 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import type { Pool } from "pg";
 import { CatalogExtractionError } from "../../errors.ts";
-import type { DatabaseApi } from "../../services/database.ts";
+import {
+  asQueryable,
+  type DatabaseApi,
+  type Queryable,
+} from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -233,7 +236,7 @@ export class Aggregate extends BasePgModel {
   }
 }
 
-export async function extractAggregates(pool: Pool): Promise<Aggregate[]> {
+export async function extractAggregates(pool: Queryable): Promise<Aggregate[]> {
   const { rows: aggregateRows } = await pool.query<AggregateProps>(sql`
 with extension_oids as (
   select
@@ -329,7 +332,7 @@ export const extractAggregatesEffect = (
   db: DatabaseApi,
 ): Effect.Effect<Aggregate[], CatalogExtractionError> =>
   Effect.tryPromise({
-    try: () => extractAggregates(db.getPool()),
+    try: () => extractAggregates(asQueryable(db)),
     catch: (err) =>
       new CatalogExtractionError({
         message: `extractAggregates failed: ${err instanceof Error ? err.message : err}`,

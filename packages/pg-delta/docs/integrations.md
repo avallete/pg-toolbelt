@@ -301,7 +301,7 @@ const result = await createPlan(sourceUrl, targetUrl, {
 **Built-in integration:**
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source postgresql://... \
   --target postgresql://... \
   --integration supabase
@@ -310,7 +310,7 @@ pg-delta plan \
 **Custom integration file:**
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source postgresql://... \
   --target postgresql://... \
   --integration ./my-integration.json
@@ -321,7 +321,7 @@ pg-delta plan \
 You can also pass filter and serialization DSLs directly:
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source postgresql://... \
   --target postgresql://... \
   --filter '{"schema":"public"}' \
@@ -333,7 +333,7 @@ pg-delta plan \
 When both an integration and explicit flags are provided, the explicit flags take precedence:
 
 ```bash
-pg-delta plan \
+pgdelta plan \
   --source postgresql://... \
   --target postgresql://... \
   --integration supabase \
@@ -420,7 +420,7 @@ The `supabase` integration provides filtering and serialization rules optimized 
 **CLI usage:**
 
 ```bash
-pg-delta plan --source <source> --target <target> --integration supabase
+pgdelta plan --source <source> --target <target> --integration supabase
 ```
 
 **Programmatic usage:**
