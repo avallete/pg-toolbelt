@@ -1,0 +1,12 @@
+import { ServiceMap } from "effect";
+
+export interface TtyApi {
+  readonly stdinIsTty: boolean;
+  readonly stdoutIsTty: boolean;
+  readonly stderrIsTty: boolean;
+  readonly isCi: boolean;
+}
+
+export class Tty extends ServiceMap.Service<Tty, TtyApi>()(
+  "@pg-delta/cli/runtime/Tty",
+) {}

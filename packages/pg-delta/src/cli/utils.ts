@@ -14,7 +14,7 @@ import type { SqlFormatOptions } from "../core/plan/sql-format.ts";
 import { formatSqlScript } from "../core/plan/statements.ts";
 import { CliExitError } from "./errors.ts";
 import { formatTree } from "./formatters/index.ts";
-import { logError, logInfo, logWarning } from "./ui.ts";
+import { Output } from "./output/output.service.ts";
 
 /**
  * Parse a JSON string inside an Effect context. Replaces the throwing
@@ -226,39 +226,44 @@ export function validatePlanRisk(
  * Handles applyPlan results and writes appropriate output.
  * Returns the exit code that should be set.
  */
-export function handleApplyResult(result: ApplyPlanResult): {
-  exitCode: number;
-} {
-  switch (result.status) {
-    case "invalid_plan":
-      logError(result.message);
-      return { exitCode: 1 };
-    case "fingerprint_mismatch":
-      logError(
-        "Target database does not match plan source fingerprint. Aborting.",
-      );
-      return { exitCode: 1 };
-    case "already_applied":
-      logInfo(
-        "Plan already applied (target fingerprint matches desired state).",
-      );
-      return { exitCode: 0 };
-    case "failed": {
-      logError(
-        `Failed to apply changes: ${result.error instanceof Error ? result.error.message : String(result.error)}`,
-      );
-      logError(`Migration script:\n${result.script}`);
-      return { exitCode: 1 };
-    }
-    case "applied": {
-      logInfo(`Applying ${result.statements} changes to database...`);
-      logInfo("Successfully applied all changes.");
-      if (result.warnings?.length) {
-        for (const warning of result.warnings) {
-          logWarning(`Warning: ${warning}`);
-        }
+export const handleApplyResultEffect = (
+  result: ApplyPlanResult,
+): Effect.Effect<{ exitCode: number }, never, Output> =>
+  Effect.gen(function* () {
+    const output = yield* Output;
+
+    switch (result.status) {
+      case "invalid_plan":
+        yield* output.error(result.message);
+        return { exitCode: 1 };
+      case "fingerprint_mismatch":
+        yield* output.error(
+          "Target database does not match plan source fingerprint. Aborting.",
+        );
+        return { exitCode: 1 };
+      case "already_applied":
+        yield* output.info(
+          "Plan already applied (target fingerprint matches desired state).",
+        );
+        return { exitCode: 0 };
+      case "failed": {
+        yield* output.error(
+          `Failed to apply changes: ${result.error instanceof Error ? result.error.message : String(result.error)}`,
+        );
+        yield* output.error(`Migration script:\n${result.script}`);
+        return { exitCode: 1 };
       }
-      return { exitCode: 0 };
+      case "applied": {
+        yield* output.info(
+          `Applying ${result.statements} changes to database...`,
+        );
+        yield* output.info("Successfully applied all changes.");
+        if (result.warnings?.length) {
+          for (const warning of result.warnings) {
+            yield* output.warn(`Warning: ${warning}`);
+          }
+        }
+        return { exitCode: 0 };
+      }
     }
-  }
-}
+  });

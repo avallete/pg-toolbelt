@@ -1,37 +1,6 @@
-/**
- * Declarative export command - export a declarative SQL schema from a database diff.
- */
-
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
-import chalk from "chalk";
-import { Effect, Option } from "effect";
+import { Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import type { Catalog } from "../../core/catalog.model.ts";
-import type { CatalogSnapshot } from "../../core/catalog.snapshot.ts";
-import { exportDeclarativeSchema } from "../../core/export/index.ts";
-import type { Grouping, GroupingPattern } from "../../core/export/types.ts";
-import type { FilterDSL } from "../../core/integrations/filter/dsl.ts";
-import type { ChangeFilter } from "../../core/integrations/filter/filter.types.ts";
-import type { SerializeDSL } from "../../core/integrations/serialize/dsl.ts";
-import type { ChangeSerializer } from "../../core/integrations/serialize/serialize.types.ts";
-import { createPlan } from "../../core/plan/index.ts";
-import type { SqlFormatOptions } from "../../core/plan/sql-format.ts";
-import { CliExitError } from "../errors.ts";
-import { logInfo, logSuccess, logWarning, writeOutput } from "../ui.ts";
-import {
-  assertSafePath,
-  buildFileTree,
-  computeFileDiff,
-  formatExportSummary,
-} from "../utils/export-display.ts";
-import { loadIntegrationDSL } from "../utils/integrations.ts";
-import { isPostgresUrl, loadCatalogFromFile } from "../utils/resolve-input.ts";
-import {
-  deserializeCatalogSnapshotEffect,
-  parseJsonEffect,
-  tryCliPromise,
-} from "../utils.ts";
+import { handleDeclarativeExport } from "./declarative-export.handler.ts";
 
 const source = Flag.string("source").pipe(
   Flag.withAlias("s"),
@@ -144,199 +113,20 @@ export const declarativeExportCommand = Command.make(
     verbose,
   },
   (args) =>
-    Effect.gen(function* () {
-      const { compileSerializeDSL } = yield* tryCliPromise(
-        "Error loading serialize DSL support",
-        () => import("../../core/integrations/serialize/dsl.ts"),
-      );
-
-      const sourceValue = Option.getOrUndefined(args.source);
-      const integrationValue = Option.getOrUndefined(args.integration);
-      const filterRaw = Option.getOrUndefined(args.filter);
-      const serializeRaw = Option.getOrUndefined(args.serialize);
-      const groupingModeValue = Option.getOrUndefined(args.groupingMode);
-      const groupPatternsRaw = Option.getOrUndefined(args.groupPatterns);
-      const flatSchemasValue = Option.getOrUndefined(args.flatSchemas);
-      const formatOptionsRaw = Option.getOrUndefined(args.formatOptions);
-
-      const filterParsed: FilterDSL | undefined = filterRaw
-        ? yield* parseJsonEffect<FilterDSL>("filter", filterRaw)
-        : undefined;
-      const serializeParsed: SerializeDSL | undefined = serializeRaw
-        ? yield* parseJsonEffect<SerializeDSL>("serialize", serializeRaw)
-        : undefined;
-      const groupPatternsParsed: GroupingPattern[] | undefined =
-        groupPatternsRaw
-          ? yield* parseJsonEffect<GroupingPattern[]>(
-              "group-patterns",
-              groupPatternsRaw,
-            ).pipe(
-              Effect.flatMap((parsed) =>
-                Array.isArray(parsed)
-                  ? Effect.succeed(parsed)
-                  : Effect.fail(
-                      new CliExitError({
-                        exitCode: 1,
-                        message: "group-patterns must be a JSON array",
-                      }),
-                    ),
-              ),
-            )
-          : undefined;
-      const formatOptionsParsed: SqlFormatOptions | undefined = formatOptionsRaw
-        ? yield* parseJsonEffect<SqlFormatOptions>(
-            "format-options",
-            formatOptionsRaw,
-          )
-        : undefined;
-
-      let filterOption: FilterDSL | ChangeFilter | undefined = filterParsed;
-      let serializeOption: SerializeDSL | ChangeSerializer | undefined =
-        serializeParsed;
-      let integrationEmptyCatalog: CatalogSnapshot | undefined;
-      if (integrationValue) {
-        const integrationDSL = yield* tryCliPromise(
-          "Error loading integration",
-          () => loadIntegrationDSL(integrationValue),
-        );
-        filterOption = filterOption ?? integrationDSL.filter;
-        serializeOption = serializeOption ?? integrationDSL.serialize;
-        integrationEmptyCatalog = integrationDSL.emptyCatalog;
-      }
-
-      let resolvedSource: string | Catalog | null;
-      if (sourceValue) {
-        resolvedSource = isPostgresUrl(sourceValue)
-          ? sourceValue
-          : yield* tryCliPromise("Error loading source catalog", () =>
-              loadCatalogFromFile(sourceValue),
-            );
-      } else if (integrationEmptyCatalog) {
-        resolvedSource = yield* deserializeCatalogSnapshotEffect(
-          integrationEmptyCatalog,
-        );
-      } else {
-        resolvedSource = null;
-      }
-
-      const resolvedTarget = isPostgresUrl(args.target)
-        ? args.target
-        : yield* tryCliPromise("Error loading target catalog", () =>
-            loadCatalogFromFile(args.target),
-          );
-
-      const planResult = yield* tryCliPromise("Error creating plan", () =>
-        createPlan(resolvedSource, resolvedTarget, {
-          filter: filterOption,
-          serialize: serializeOption,
-          skipDefaultPrivilegeSubtraction: true,
-        }),
-      );
-
-      if (!planResult) {
-        logInfo("No changes detected.");
-        return;
-      }
-
-      const hasGrouping =
-        groupingModeValue !== undefined ||
-        (groupPatternsParsed !== undefined && groupPatternsParsed.length > 0) ||
-        (flatSchemasValue !== undefined && flatSchemasValue.length > 0);
-
-      let grouping: Grouping | undefined;
-      if (hasGrouping) {
-        grouping = {
-          mode: groupingModeValue ?? "single-file",
-          groupPatterns: groupPatternsParsed,
-          autoGroupPartitions: true,
-          flatSchemas:
-            flatSchemasValue !== undefined
-              ? flatSchemasValue
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean)
-              : undefined,
-        };
-      }
-
-      const serializeFn =
-        serializeOption !== undefined
-          ? compileSerializeDSL(serializeOption)
-          : undefined;
-
-      const exportOutput = exportDeclarativeSchema(planResult, {
-        integration:
-          serializeFn !== undefined ? { serialize: serializeFn } : undefined,
-        formatOptions: formatOptionsParsed ?? undefined,
-        grouping,
-        onWarning: (msg) => {
-          logWarning(`Warning: ${msg}`);
-        },
-      });
-
-      const outputDir = path.resolve(args.output);
-      const applyTip = (dir: string) =>
-        `\nTip: To apply this schema to an empty database, run:\n  pgdelta declarative apply --path ${dir} --target <database_url>`;
-      const diff = yield* tryCliPromise(
-        "Error comparing output directory",
-        () => computeFileDiff(outputDir, exportOutput.files),
-      );
-
-      const treeOutput = buildFileTree(
-        exportOutput.files.map((f) => f.path),
-        path.basename(outputDir) || outputDir,
-        { diff, diffFocus: args.diffFocus },
-      );
-      writeOutput(treeOutput);
-      writeOutput(
-        `${chalk.green("+")} created   ${chalk.yellow("~")} updated   ${chalk.red("-")} deleted`,
-      );
-
-      const summary = formatExportSummary(diff, args.dryRun);
-      if (summary) {
-        logInfo(summary);
-      }
-
-      const totalChanges = planResult.sortedChanges.length;
-      const totalStatements = exportOutput.files.reduce(
-        (s, f) => s + f.statements,
-        0,
-      );
-      logInfo(
-        `Changes: ${totalChanges} | Files: ${exportOutput.files.length} | Statements: ${totalStatements}`,
-      );
-
-      if (args.dryRun) {
-        logInfo(chalk.dim("\n(dry-run: no files written)"));
-        logInfo(chalk.cyan(applyTip(outputDir)));
-        return;
-      }
-
-      if (args.force) {
-        yield* tryCliPromise("Error clearing output directory", () =>
-          rm(outputDir, { recursive: true, force: true }),
-        );
-        yield* tryCliPromise("Error recreating output directory", () =>
-          mkdir(outputDir, { recursive: true }),
-        );
-      } else if (diff.deleted.length > 0) {
-        logWarning(
-          `Warning: ${diff.deleted.length} existing file(s) will no longer be present. Use --force to replace the output directory.`,
-        );
-      }
-
-      for (const file of exportOutput.files) {
-        assertSafePath(file.path, outputDir);
-        const filePath = path.join(outputDir, file.path);
-        yield* tryCliPromise("Error creating export subdirectory", () =>
-          mkdir(path.dirname(filePath), { recursive: true }),
-        );
-        yield* tryCliPromise(`Error writing ${file.path}`, () =>
-          writeFile(filePath, file.sql),
-        );
-      }
-
-      logSuccess(`Wrote ${exportOutput.files.length} file(s) to ${outputDir}`);
-      logInfo(applyTip(outputDir).trim());
+    handleDeclarativeExport({
+      source: Option.getOrUndefined(args.source),
+      target: args.target,
+      output: args.output,
+      integration: Option.getOrUndefined(args.integration),
+      filter: Option.getOrUndefined(args.filter),
+      serialize: Option.getOrUndefined(args.serialize),
+      groupingMode: Option.getOrUndefined(args.groupingMode),
+      groupPatterns: Option.getOrUndefined(args.groupPatterns),
+      flatSchemas: Option.getOrUndefined(args.flatSchemas),
+      formatOptions: Option.getOrUndefined(args.formatOptions),
+      force: args.force,
+      dryRun: args.dryRun,
+      diffFocus: args.diffFocus,
+      verbose: args.verbose,
     }),
 );

@@ -1,20 +1,5 @@
-/**
- * Apply command - apply a plan's migration script to a target database.
- */
-
-import { readFile } from "node:fs/promises";
-import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { applyPlan } from "../../core/plan/apply.ts";
-import { deserializePlan, type Plan } from "../../core/plan/index.ts";
-import { CliExitError } from "../errors.ts";
-import { setExitCode } from "../runtime.ts";
-import { logWarningBlock } from "../ui.ts";
-import {
-  handleApplyResult,
-  tryCliPromise,
-  validatePlanRisk,
-} from "../utils.ts";
+import { handleApply } from "./apply.handler.ts";
 
 const plan = Flag.string("plan").pipe(
   Flag.withAlias("p"),
@@ -40,58 +25,5 @@ const unsafe = Flag.boolean("unsafe").pipe(
 export const applyCommand = Command.make(
   "apply",
   { plan, source, target, unsafe },
-  (args) =>
-    Effect.gen(function* () {
-      const planJson = yield* Effect.tryPromise({
-        try: () => readFile(args.plan, "utf-8"),
-        catch: (error) =>
-          new CliExitError({
-            exitCode: 1,
-            message: `Error reading plan file: ${error instanceof Error ? error.message : String(error)}`,
-          }),
-      });
-
-      const parsedPlan: Plan = yield* Effect.try({
-        try: () => deserializePlan(planJson),
-        catch: (error) =>
-          new CliExitError({
-            exitCode: 1,
-            message: `Error parsing plan file: ${error instanceof Error ? error.message : String(error)}`,
-          }),
-      });
-
-      const validation = validatePlanRisk(parsedPlan, args.unsafe);
-      if (!validation.valid) {
-        const warning = validation.warning;
-        if (warning) {
-          yield* Effect.sync(() => {
-            logWarningBlock([
-              warning.title,
-              ...warning.statements.map((statement) => `- ${statement}`),
-              warning.suggestion,
-            ]);
-          });
-        }
-        return yield* Effect.fail(
-          new CliExitError({
-            exitCode: validation.exitCode,
-            message: validation.message,
-          }),
-        );
-      }
-
-      const result = yield* tryCliPromise("Error applying plan", () =>
-        applyPlan(parsedPlan, args.source, args.target, {
-          verifyPostApply: true,
-        }),
-      );
-
-      const { exitCode } = handleApplyResult(result);
-      if (exitCode !== 0) {
-        yield* Effect.sync(() => {
-          setExitCode(exitCode);
-        });
-        return;
-      }
-    }),
+  handleApply,
 );

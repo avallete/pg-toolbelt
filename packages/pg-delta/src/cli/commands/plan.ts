@@ -2,26 +2,9 @@
  * Plan command - compute schema diff and preview changes.
  */
 
-import { writeFile } from "node:fs/promises";
-import { Effect, Option } from "effect";
+import { Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import type { Catalog } from "../../core/catalog.model.ts";
-import type { FilterDSL } from "../../core/integrations/filter/dsl.ts";
-import type { ChangeFilter } from "../../core/integrations/filter/filter.types.ts";
-import type { SerializeDSL } from "../../core/integrations/serialize/dsl.ts";
-import type { ChangeSerializer } from "../../core/integrations/serialize/serialize.types.ts";
-import { createPlan } from "../../core/plan/index.ts";
-import type { SqlFormatOptions } from "../../core/plan/sql-format.ts";
-import { ChangesDetected } from "../errors.ts";
-import { logInfo, writeOutput } from "../ui.ts";
-import { loadIntegrationDSL } from "../utils/integrations.ts";
-import { isPostgresUrl, loadCatalogFromFile } from "../utils/resolve-input.ts";
-import {
-  deserializeCatalogSnapshotEffect,
-  formatPlanForDisplay,
-  parseJsonEffect,
-  tryCliPromise,
-} from "../utils.ts";
+import { handlePlan } from "./plan.handler.ts";
 
 const source = Flag.string("source").pipe(
   Flag.withAlias("s"),
@@ -108,115 +91,16 @@ export const planCommand = Command.make(
     sqlFormatOptions,
   },
   (args) =>
-    Effect.gen(function* () {
-      const sourceValue = Option.getOrUndefined(args.source);
-      const formatValue = Option.getOrUndefined(args.format);
-      const outputValue = Option.getOrUndefined(args.output);
-      const roleValue = Option.getOrUndefined(args.role);
-      const filterRaw = Option.getOrUndefined(args.filter);
-      const serializeRaw = Option.getOrUndefined(args.serialize);
-      const integrationValue = Option.getOrUndefined(args.integration);
-      const sqlFormatOptionsRaw = Option.getOrUndefined(args.sqlFormatOptions);
-
-      const filterParsed: FilterDSL | undefined = filterRaw
-        ? yield* parseJsonEffect<FilterDSL>("filter", filterRaw)
-        : undefined;
-      const serializeParsed: SerializeDSL | undefined = serializeRaw
-        ? yield* parseJsonEffect<SerializeDSL>("serialize", serializeRaw)
-        : undefined;
-      const sqlFormatOptionsParsed: SqlFormatOptions | undefined =
-        sqlFormatOptionsRaw
-          ? yield* parseJsonEffect<SqlFormatOptions>(
-              "SQL format",
-              sqlFormatOptionsRaw,
-            )
-          : undefined;
-
-      let filterOption: FilterDSL | ChangeFilter | undefined = filterParsed;
-      let serializeOption: SerializeDSL | ChangeSerializer | undefined =
-        serializeParsed;
-      let integrationEmptyCatalog:
-        | import("../../core/catalog.snapshot.ts").CatalogSnapshot
-        | undefined;
-      if (integrationValue) {
-        const integrationDSL = yield* tryCliPromise(
-          "Error loading integration",
-          () => loadIntegrationDSL(integrationValue),
-        );
-        filterOption = filterOption ?? integrationDSL.filter;
-        serializeOption = serializeOption ?? integrationDSL.serialize;
-        integrationEmptyCatalog = integrationDSL.emptyCatalog;
-      }
-
-      let resolvedSource: string | Catalog | null;
-      if (sourceValue) {
-        resolvedSource = isPostgresUrl(sourceValue)
-          ? sourceValue
-          : yield* tryCliPromise("Error loading source catalog", () =>
-              loadCatalogFromFile(sourceValue),
-            );
-      } else if (integrationEmptyCatalog) {
-        resolvedSource = yield* deserializeCatalogSnapshotEffect(
-          integrationEmptyCatalog,
-        );
-      } else {
-        resolvedSource = null;
-      }
-
-      const resolvedTarget = isPostgresUrl(args.target)
-        ? args.target
-        : yield* tryCliPromise("Error loading target catalog", () =>
-            loadCatalogFromFile(args.target),
-          );
-
-      const planResult = yield* tryCliPromise("Error creating plan", () =>
-        createPlan(resolvedSource, resolvedTarget, {
-          role: roleValue,
-          filter: filterOption,
-          serialize: serializeOption,
-        }),
-      );
-      if (!planResult) {
-        logInfo("No changes detected.");
-        return;
-      }
-
-      const outputPath = outputValue;
-      let effectiveFormat: "tree" | "json" | "sql";
-      if (formatValue) {
-        effectiveFormat = formatValue;
-      } else if (outputPath?.endsWith(".sql")) {
-        effectiveFormat = "sql";
-      } else if (outputPath?.endsWith(".json")) {
-        effectiveFormat = "json";
-      } else {
-        effectiveFormat = "tree";
-      }
-
-      const { content, label } = formatPlanForDisplay(
-        planResult,
-        effectiveFormat,
-        {
-          disableColors: !!outputPath,
-          showUnsafeFlagSuggestion: false,
-          sqlFormatOptions:
-            args.sqlFormat || sqlFormatOptionsParsed
-              ? (sqlFormatOptionsParsed ?? {})
-              : undefined,
-        },
-      );
-
-      if (outputPath) {
-        yield* tryCliPromise(`Error writing ${label.toLowerCase()}`, () =>
-          writeFile(outputPath, content, "utf-8"),
-        );
-        logInfo(`${label} written to ${outputPath}`);
-      } else {
-        writeOutput(content.endsWith("\n") ? content.trimEnd() : content);
-      }
-
-      return yield* Effect.fail(
-        new ChangesDetected({ message: "Changes detected" }),
-      );
+    handlePlan({
+      source: Option.getOrUndefined(args.source),
+      target: args.target,
+      format: Option.getOrUndefined(args.format),
+      output: Option.getOrUndefined(args.output),
+      role: Option.getOrUndefined(args.role),
+      filter: Option.getOrUndefined(args.filter),
+      serialize: Option.getOrUndefined(args.serialize),
+      integration: Option.getOrUndefined(args.integration),
+      sqlFormat: args.sqlFormat,
+      sqlFormatOptions: Option.getOrUndefined(args.sqlFormatOptions),
     }),
 );

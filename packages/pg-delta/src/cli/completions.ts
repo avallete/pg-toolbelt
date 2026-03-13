@@ -4,7 +4,12 @@ import { pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 
-export const SUPPORTED_COMPLETION_SHELLS = ["bash", "zsh", "fish", "sh"] as const;
+export const SUPPORTED_COMPLETION_SHELLS = [
+  "bash",
+  "zsh",
+  "fish",
+  "sh",
+] as const;
 
 type SupportedCompletionShell = (typeof SUPPORTED_COMPLETION_SHELLS)[number];
 type GeneratorShell = Exclude<SupportedCompletionShell, "sh">;
@@ -15,9 +20,16 @@ interface InternalCommandDescriptor {
 
 interface InternalCompletionModules {
   readonly fromCommand: (command: unknown) => InternalCommandDescriptor;
-  readonly generate: (
+  readonly generateBash: (
     executableName: string,
-    shell: GeneratorShell,
+    descriptor: InternalCommandDescriptor,
+  ) => string;
+  readonly generateZsh: (
+    executableName: string,
+    descriptor: InternalCommandDescriptor,
+  ) => string;
+  readonly generateFish: (
+    executableName: string,
     descriptor: InternalCommandDescriptor,
   ) => string;
 }
@@ -61,7 +73,12 @@ export async function generateCompletionScript(
     const modules = await loadInternalCompletionModules();
     const descriptor = modules.fromCommand(command);
     const generatorShell = shell === "sh" ? "bash" : shell;
-    const rawScript = modules.generate(executableName, generatorShell, descriptor);
+    const rawScript =
+      generatorShell === "bash"
+        ? modules.generateBash(executableName, descriptor)
+        : generatorShell === "zsh"
+          ? modules.generateZsh(executableName, descriptor)
+          : modules.generateFish(executableName, descriptor);
 
     return {
       script: sanitizeCompletionScript(rawScript, generatorShell),
@@ -94,18 +111,33 @@ async function loadInternalCompletionModules(): Promise<InternalCompletionModule
   if (!internalCompletionModulesPromise) {
     internalCompletionModulesPromise = (async () => {
       const commandModulePath = require.resolve("effect/unstable/cli/Command");
-      const completionsDir = join(dirname(commandModulePath), "internal", "completions");
+      const completionsDir = join(
+        dirname(commandModulePath),
+        "internal",
+        "completions",
+      );
 
-      const [{ fromCommand }, { generate }] = await Promise.all([
+      const [{ fromCommand }, bash, zsh, fish] = await Promise.all([
         import(
           pathToFileURL(join(completionsDir, "CommandDescriptor.js")).href
         ) as Promise<Pick<InternalCompletionModules, "fromCommand">>,
-        import(
-          pathToFileURL(join(completionsDir, "Completions.js")).href
-        ) as Promise<Pick<InternalCompletionModules, "generate">>,
+        import(pathToFileURL(join(completionsDir, "bash.js")).href) as Promise<{
+          readonly generate: InternalCompletionModules["generateBash"];
+        }>,
+        import(pathToFileURL(join(completionsDir, "zsh.js")).href) as Promise<{
+          readonly generate: InternalCompletionModules["generateZsh"];
+        }>,
+        import(pathToFileURL(join(completionsDir, "fish.js")).href) as Promise<{
+          readonly generate: InternalCompletionModules["generateFish"];
+        }>,
       ]);
 
-      return { fromCommand, generate };
+      return {
+        fromCommand,
+        generateBash: bash.generate,
+        generateZsh: zsh.generate,
+        generateFish: fish.generate,
+      };
     })();
   }
 

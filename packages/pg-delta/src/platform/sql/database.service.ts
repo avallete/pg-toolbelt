@@ -1,0 +1,143 @@
+import type * as PgClient from "@effect/sql-pg/PgClient";
+import { Effect, ServiceMap } from "effect";
+import type { Connection as SqlConnection } from "effect/unstable/sql/SqlConnection";
+import type {
+  CatalogExtractionError,
+  ConnectionError,
+} from "../../core/errors.ts";
+
+export type QueryInput = string | { text: string; values?: readonly unknown[] };
+
+export interface QueryResult<R = Record<string, unknown>> {
+  readonly rows: R[];
+  readonly rowCount: number | null;
+}
+
+export interface DatabaseConnectionApi {
+  readonly query: <R = Record<string, unknown>>(
+    query: QueryInput,
+    values?: readonly unknown[],
+  ) => Effect.Effect<QueryResult<R>, CatalogExtractionError>;
+}
+
+export interface DatabaseApi extends DatabaseConnectionApi {
+  readonly withConnection: <A, E, R>(
+    use: (connection: DatabaseConnectionApi) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | ConnectionError | CatalogExtractionError, R>;
+}
+
+export class SqlDatabase extends ServiceMap.Service<SqlDatabase, DatabaseApi>()(
+  "@pg-delta/platform/sql/SqlDatabase",
+) {}
+
+export const makeDatabaseConnection = (
+  connection: SqlConnection,
+  onError: (error: unknown) => CatalogExtractionError,
+): DatabaseConnectionApi => ({
+  query: <R = Record<string, unknown>>(
+    query: QueryInput,
+    values?: readonly unknown[],
+  ) =>
+    connection
+      .executeRaw(
+        typeof query === "string" ? query : query.text,
+        (typeof query === "string" ? values : (query.values ?? values)) ?? [],
+      )
+      .pipe(Effect.map(normalizeRawResult<R>), Effect.mapError(onError)),
+});
+
+export const fromPgClient = (
+  client: PgClient.PgClient,
+  options?: {
+    readonly queryError?: (error: unknown) => CatalogExtractionError;
+    readonly connectionError?: (error: unknown) => ConnectionError;
+  },
+): DatabaseApi => {
+  const queryError =
+    options?.queryError ??
+    ((error: unknown) => {
+      throw error;
+    });
+  const connectionError =
+    options?.connectionError ??
+    ((error: unknown) => {
+      throw error;
+    });
+
+  return {
+    query: <R = Record<string, unknown>>(
+      query: QueryInput,
+      values?: readonly unknown[],
+    ) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* client.reserve.pipe(
+            Effect.mapError(queryError),
+          );
+          const dbConnection = makeDatabaseConnection(connection, queryError);
+          return yield* dbConnection.query<R>(query, values);
+        }),
+      ),
+    withConnection: <A, E, R>(
+      use: (connection: DatabaseConnectionApi) => Effect.Effect<A, E, R>,
+    ) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* client.reserve.pipe(
+            Effect.mapError(connectionError),
+          );
+          return yield* use(makeDatabaseConnection(connection, queryError));
+        }),
+      ),
+  };
+};
+
+/**
+ * Promise-oriented extractors still accept a queryable shape. This adapter keeps
+ * them usable without forcing the pure extractor implementations to know about
+ * Effect.
+ */
+export interface Queryable {
+  readonly query: <R = Record<string, unknown>>(
+    query: QueryInput,
+    values?: readonly unknown[],
+  ) => Promise<QueryResult<R>>;
+}
+
+export const asQueryable = (db: DatabaseApi): Queryable => ({
+  query: <R = Record<string, unknown>>(
+    query: QueryInput,
+    values?: readonly unknown[],
+  ) =>
+    db
+      .query<R>(
+        typeof query === "string" ? query : query.text,
+        values ?? (typeof query === "string" ? undefined : query.values),
+      )
+      .pipe(Effect.runPromise),
+});
+
+function normalizeRawResult<R>(raw: unknown): QueryResult<R> {
+  if (Array.isArray(raw)) {
+    const last = raw[raw.length - 1] as
+      | { rows?: R[]; rowCount?: number | null }
+      | undefined;
+    return {
+      rows: last?.rows ?? [],
+      rowCount: last?.rowCount ?? null,
+    };
+  }
+
+  if (typeof raw === "object" && raw !== null) {
+    const result = raw as { rows?: R[]; rowCount?: number | null };
+    return {
+      rows: result.rows ?? [],
+      rowCount: result.rowCount ?? null,
+    };
+  }
+
+  return {
+    rows: [],
+    rowCount: null,
+  };
+}

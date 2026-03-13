@@ -128,6 +128,14 @@ if (planResult) {
 }
 ```
 
+Runtime-specific entrypoints are available when you want a more explicit API split:
+
+```typescript
+import { createPlan, applyPlan } from "@supabase/pg-delta/node";
+import { Effect } from "effect";
+import { createPlan as createPlanEffect } from "@supabase/pg-delta/effect";
+```
+
 For plan-based workflow:
 
 ```typescript
@@ -149,22 +157,26 @@ if (planResult) {
 }
 ```
 
-Effect-native entrypoints are also available:
+The canonical Effect-native surface now lives under `@supabase/pg-delta/effect`:
 
 ```typescript
 import { Effect } from "effect";
-import { applyPlanEffect, createPlanEffect } from "@supabase/pg-delta";
+import { applyPlan, createPlan } from "@supabase/pg-delta/effect";
 
-const result = await createPlanEffect(sourceUrl, targetUrl).pipe(
+const result = await createPlan(sourceUrl, targetUrl).pipe(
   Effect.runPromise,
 );
 
 if (result) {
-  await applyPlanEffect(result.plan, sourceUrl, targetUrl).pipe(
+  await applyPlan(result.plan, sourceUrl, targetUrl).pipe(
     Effect.runPromise,
   );
 }
 ```
+
+Internally, the Effect-native path now uses the published
+`@effect/sql-pg@4.0.0-beta.31` client as the database foundation, with
+`pg-delta` adding only its own session and error-mapping policy on top.
 
 ## Documentation
 

@@ -81,9 +81,18 @@ for (const pgVersion of POSTGRES_VERSIONS) {
 
 - `bin/cli.ts` — Entry point.
 - `app.ts` — @effect/cli framework.
-- `commands/` — plan, apply, sync, declarative-export, declarative-apply, etc.
+- `commands/*.ts` — command definitions; command bodies now live in sibling `*.handler.ts` files.
+- `output/` — shared `Output` service plus transport layers.
+- `runtime/` — process and TTY service boundaries for the CLI edge.
 - `formatters/` — Tree view, SQL scripts.
 - `utils.ts` — Shared CLI helpers.
+
+### Public API split
+
+- `src/effect.ts` — canonical Effect-native API.
+- `src/node.ts` — promise facade for Node consumers.
+- `src/bun.ts` — Bun convenience facade over the shared Effect core.
+- `src/platform/sql/` — thin adapter over published `@effect/sql-pg`, plus pg-delta-specific SSL/session policy.
 
 ## Key Concepts
 

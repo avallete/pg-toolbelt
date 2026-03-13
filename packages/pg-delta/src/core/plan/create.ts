@@ -9,11 +9,16 @@ import { diffCatalogs } from "../catalog.diff.ts";
 import {
   Catalog,
   createEmptyCatalog,
-  extractCatalog,
+  extractCatalogEffect,
 } from "../catalog.model.ts";
 import type { Change } from "../change.types.ts";
 import type { DiffContext } from "../context.ts";
-import { CatalogExtractionError } from "../errors.ts";
+import {
+  CatalogExtractionError,
+  type ConnectionError,
+  type ConnectionTimeoutError,
+  type SslConfigError,
+} from "../errors.ts";
 import { buildPlanScopeFingerprint, hashStableIds } from "../fingerprint.ts";
 import {
   compileFilterDSL,
@@ -24,7 +29,8 @@ import {
   compileSerializeDSL,
   type SerializeDSL,
 } from "../integrations/serialize/dsl.ts";
-import { createManagedPool, endPool } from "../postgres-config.ts";
+import type { DatabaseApi } from "../services/database.ts";
+import { makeScopedPool, wrapPool } from "../services/database-live.ts";
 import { sortChanges } from "../sort/sort-changes.ts";
 import type { PgDependRow } from "../sort/types.ts";
 import { classifyChangesRisk } from "./risk.ts";
@@ -38,7 +44,7 @@ import type { CreatePlanOptions, Plan } from "./types.ts";
  * Input for source/target: a postgres connection URL, an existing Pool, or
  * an already-resolved Catalog (e.g. deserialized from a snapshot file).
  */
-export type CatalogInput = string | Pool | Catalog;
+export type CatalogInput = string | Pool | DatabaseApi | Catalog;
 
 /**
  * Create a migration plan by comparing two catalog states.
@@ -62,53 +68,7 @@ export async function createPlan(
   target: CatalogInput,
   options: CreatePlanOptions = {},
 ): Promise<{ plan: Plan; sortedChanges: Change[]; ctx: DiffContext } | null> {
-  const resolvePool = async (
-    input: string | Pool,
-    label: "source" | "target",
-  ): Promise<{ pool: Pool; shouldClose: boolean }> => {
-    if (typeof input === "string") {
-      const managed = await createManagedPool(input, {
-        role: options.role,
-        label,
-      });
-      return { pool: managed.pool, shouldClose: true };
-    }
-    return { pool: input, shouldClose: false };
-  };
-
-  /**
-   * Resolve a CatalogInput to a Catalog, tracking pools that need cleanup.
-   */
-  const resolveCatalog = async (
-    input: CatalogInput,
-    label: "source" | "target",
-    pools: Array<{ pool: Pool; shouldClose: boolean }>,
-  ): Promise<Catalog> => {
-    if (input instanceof Catalog) {
-      return input;
-    }
-    const resolved = await resolvePool(input, label);
-    pools.push(resolved);
-    return extractCatalog(resolved.pool);
-  };
-
-  const pools: Array<{ pool: Pool; shouldClose: boolean }> = [];
-
-  try {
-    const toCatalog = await resolveCatalog(target, "target", pools);
-
-    const fromCatalog =
-      source !== null
-        ? await resolveCatalog(source, "source", pools)
-        : await createEmptyCatalog(toCatalog.version, toCatalog.currentUser);
-
-    return buildPlanForCatalogs(fromCatalog, toCatalog, options);
-  } finally {
-    const closers = pools
-      .filter((p) => p.shouldClose)
-      .map((p) => endPool(p.pool));
-    if (closers.length) await Promise.all(closers);
-  }
+  return createPlanEffect(source, target, options).pipe(Effect.runPromise);
 }
 
 /**
@@ -379,13 +339,60 @@ export const createPlanEffect = (
   options: CreatePlanOptions = {},
 ): Effect.Effect<
   { plan: Plan; sortedChanges: Change[]; ctx: DiffContext } | null,
-  CatalogExtractionError
+  | CatalogExtractionError
+  | ConnectionError
+  | ConnectionTimeoutError
+  | SslConfigError
 > =>
-  Effect.tryPromise({
-    try: () => createPlan(source, target, options),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `createPlan failed: ${err instanceof Error ? err.message : err}`,
-        cause: err,
-      }),
+  Effect.gen(function* () {
+    const toCatalog = yield* resolveCatalogEffect(target, "target", options);
+
+    const fromCatalog =
+      source !== null
+        ? yield* resolveCatalogEffect(source, "source", options)
+        : yield* Effect.tryPromise({
+            try: () =>
+              createEmptyCatalog(toCatalog.version, toCatalog.currentUser),
+            catch: (error) =>
+              new CatalogExtractionError({
+                message: `Failed to create empty catalog: ${error instanceof Error ? error.message : String(error)}`,
+                cause: error,
+              }),
+          });
+
+    return buildPlanForCatalogs(fromCatalog, toCatalog, options);
   });
+
+const resolveCatalogEffect = (
+  input: CatalogInput,
+  label: "source" | "target",
+  options: CreatePlanOptions,
+): Effect.Effect<
+  Catalog,
+  | CatalogExtractionError
+  | ConnectionError
+  | ConnectionTimeoutError
+  | SslConfigError
+> => {
+  if (input instanceof Catalog) {
+    return Effect.succeed(input);
+  }
+
+  if (typeof input === "string") {
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const db = yield* makeScopedPool(input, {
+          role: options.role,
+          label,
+        });
+        return yield* extractCatalogEffect(db);
+      }),
+    );
+  }
+
+  if ("withConnection" in input) {
+    return extractCatalogEffect(input);
+  }
+
+  return extractCatalogEffect(wrapPool(input));
+};

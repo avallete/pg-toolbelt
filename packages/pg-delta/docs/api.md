@@ -1,6 +1,14 @@
 # API Reference
 
-The `@supabase/pg-delta` package provides a programmatic API for generating and applying migration plans.
+`@supabase/pg-delta` now exposes three library entrypoints:
+
+- `@supabase/pg-delta` — curated promise-friendly root surface
+- `@supabase/pg-delta/node` — explicit Node promise facade over the shared Effect core
+- `@supabase/pg-delta/effect` — canonical Effect-native API
+
+The Effect-native implementation is backed by
+`@effect/sql-pg@4.0.0-beta.31`, with `pg-delta` keeping a thin adapter for
+its own SSL/session policy and error normalization.
 
 ## Installation
 
@@ -42,14 +50,27 @@ if (result) {
 ```typescript
 import {
   applyPlan,
-  applyPlanEffect,
   createPlan,
-  createPlanEffect,
-  makeScopedPool,
   type Plan,
   type CreatePlanOptions,
   type IntegrationDSL,
 } from "@supabase/pg-delta";
+```
+
+### Effect Entry Point
+
+```typescript
+import {
+  applyPlan,
+  createPlan,
+  makeScopedDatabase,
+} from "@supabase/pg-delta/effect";
+```
+
+### Node Entry Point
+
+```typescript
+import { applyPlan, createPlan } from "@supabase/pg-delta/node";
 ```
 
 ### Integrations
@@ -64,20 +85,20 @@ import { supabase } from "@supabase/pg-delta/integrations/supabase";
 
 Create a migration plan by comparing two databases.
 
-#### Parameters
+#### applyPlan Parameters
 
 - `source` (`CatalogInput | null`): Source database connection URL, `pg` `Pool`, catalog snapshot, or `null` for an empty baseline
 - `target` (`CatalogInput`): Target database connection URL, `pg` `Pool`, or catalog snapshot
 - `options` (CreatePlanOptions, optional): Configuration options
 
-#### Returns
+#### applyPlan Returns
 
 `Promise<{ plan: Plan; sortedChanges: Change[]; ctx: DiffContext } | null>`
 
 - Returns an object with the plan and metadata if there are changes
 - Returns `null` if databases are identical
 
-#### Example
+#### applyPlan Example
 
 ```typescript
 import { createPlan } from "@supabase/pg-delta";

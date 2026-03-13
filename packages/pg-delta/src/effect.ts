@@ -1,13 +1,11 @@
-/**
- * Curated root surface for pg-delta.
- *
- * The canonical Effect-native API lives at `@supabase/pg-delta/effect`.
- * The root entry keeps a promise-friendly facade plus pure shared types.
- */
+import type { Pool } from "pg";
+import type { Catalog } from "./core/catalog.model.ts";
+import type { DatabaseApi } from "./core/services/database.ts";
 
 export {
   Catalog,
   createEmptyCatalog,
+  extractCatalogEffect as extractCatalog,
 } from "./core/catalog.model.ts";
 export type { CatalogSnapshot } from "./core/catalog.snapshot.ts";
 export {
@@ -15,11 +13,12 @@ export {
   serializeCatalog,
   stringifyCatalogSnapshot,
 } from "./core/catalog.snapshot.ts";
-export { loadDeclarativeSchema } from "./core/declarative-apply/discover-sql.ts";
+export { loadDeclarativeSchemaEffect as loadDeclarativeSchema } from "./core/declarative-apply/discover-sql.ts";
 export type {
   DeclarativeApplyResult,
   SqlFileEntry,
 } from "./core/declarative-apply/index.ts";
+export { applyDeclarativeSchemaEffect as applyDeclarativeSchema } from "./core/declarative-apply/index.ts";
 export {
   AlreadyAppliedError,
   CatalogExtractionError,
@@ -42,14 +41,20 @@ export type {
   FileMetadata,
 } from "./core/export/types.ts";
 export type { IntegrationDSL } from "./core/integrations/integration-dsl.ts";
+export { applyPlanEffect as applyPlan } from "./core/plan/apply.ts";
 export type { CatalogInput } from "./core/plan/create.ts";
+export { createPlanEffect as createPlan } from "./core/plan/create.ts";
 export type { SqlFormatOptions } from "./core/plan/sql-format.ts";
 export { formatSqlStatements } from "./core/plan/sql-format.ts";
 export type { CreatePlanOptions, Plan } from "./core/plan/types.ts";
-export type { DatabaseApi } from "./core/services/database.ts";
+export type {
+  DatabaseApi,
+  DatabaseConnectionApi,
+} from "./core/services/database.ts";
+export { DatabaseService } from "./core/services/database.ts";
 export {
-  applyDeclarativeSchema,
-  applyPlan,
-  createPlan,
-  extractCatalog,
-} from "./node.ts";
+  makeScopedPool as makeScopedDatabase,
+  wrapPool as fromPool,
+} from "./core/services/database-live.ts";
+
+export type EffectCatalogInput = string | Pool | Catalog | DatabaseApi;

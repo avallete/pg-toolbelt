@@ -1,7 +1,7 @@
+import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
 import { normalizeCliOutput } from "./helpers/normalize-cli-output.ts";
 import { runCli } from "./helpers/run-cli.ts";
 
@@ -156,14 +156,21 @@ ERROR
   });
 
   test("root sync flags produce a readable explicit-command error", async () => {
-    const result = await runCli(["--source", "postgres://a", "--target", "postgres://b"]);
+    const result = await runCli([
+      "--source",
+      "postgres://a",
+      "--target",
+      "postgres://b",
+    ]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("USAGE");
     expect(result.stdout).toContain("pgdelta <subcommand> [flags]");
     expect(result.stderr).toContain("Unrecognized flag: --source");
     expect(result.stderr).toContain('Unknown subcommand "postgres://a"');
-    expect(result.stderr).not.toContain("Root-level sync flags are not supported");
+    expect(result.stderr).not.toContain(
+      "Root-level sync flags are not supported",
+    );
     expect(result.stderr).not.toContain("Cause(");
   });
 
@@ -344,7 +351,14 @@ ERROR
     const result = await runCli([
       "plan",
       "--target",
-      join(packageRoot, "tests", "fixtures", "cli", "offline", "missing.snapshot.json"),
+      join(
+        packageRoot,
+        "tests",
+        "fixtures",
+        "cli",
+        "offline",
+        "missing.snapshot.json",
+      ),
     ]);
 
     expect(result.exitCode).toBe(1);

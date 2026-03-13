@@ -7,13 +7,9 @@
   "target": {
     "fingerprint": "target"
   },
-  "statements": [
-    "DROP TABLE public.users;"
-  ],
+  "statements": ["DROP TABLE public.users;"],
   "risk": {
     "level": "data_loss",
-    "statements": [
-      "DROP TABLE public.users;"
-    ]
+    "statements": ["DROP TABLE public.users;"]
   }
 }

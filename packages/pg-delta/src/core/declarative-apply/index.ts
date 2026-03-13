@@ -13,12 +13,13 @@ import { analyzeAndSort } from "@supabase/pg-topo";
 import { Effect } from "effect";
 import type { Pool } from "pg";
 import { DeclarativeApplyError } from "../errors.ts";
-import { createManagedPool } from "../postgres-config.ts";
-import { extractCatalogProviders } from "./extract-catalog-providers.ts";
+import type { DatabaseApi } from "../services/database.ts";
+import { makeScopedPool, wrapPool } from "../services/database-live.ts";
+import { extractCatalogProvidersEffect } from "./extract-catalog-providers.ts";
 import {
   type ApplyResult,
   type RoundResult,
-  roundApply,
+  roundApplyEffect,
   type StatementEntry,
 } from "./round-apply.ts";
 
@@ -34,7 +35,7 @@ interface DeclarativeApplyOptions {
   /** Target database connection URL (required if pool is not provided) */
   targetUrl?: string;
   /** Existing pool to use (caller owns it; not closed). If provided, targetUrl is ignored. */
-  pool?: Pool;
+  pool?: Pool | DatabaseApi;
   /** Max rounds before giving up (default: 100) */
   maxRounds?: number;
   /** Run final function body validation (default: true) */
@@ -95,108 +96,7 @@ function remapStatementId(
 export async function applyDeclarativeSchema(
   options: DeclarativeApplyOptions,
 ): Promise<DeclarativeApplyResult> {
-  const {
-    content,
-    targetUrl,
-    pool: providedPool,
-    maxRounds = 100,
-    validateFunctionBodies = true,
-    disableCheckFunctionBodies = true,
-    onRoundComplete,
-  } = options;
-
-  if (content.length === 0) {
-    return {
-      apply: {
-        status: "success",
-        totalRounds: 0,
-        totalApplied: 0,
-        totalSkipped: 0,
-        rounds: [],
-      },
-      diagnostics: [],
-      totalStatements: 0,
-    };
-  }
-
-  let pool: Pool;
-  let closePool: (() => Promise<void>) | undefined;
-  if (providedPool != null) {
-    pool = providedPool;
-  } else if (targetUrl != null) {
-    const managed = await createManagedPool(targetUrl, { label: "target" });
-    pool = managed.pool;
-    closePool = managed.close;
-  } else {
-    throw new Error("Either targetUrl or pool must be provided");
-  }
-
-  try {
-    const externalProviders = await extractCatalogProviders(pool);
-
-    // Step 1: pg-topo analyze and sort (no file I/O; uses synthetic <input:i> paths)
-    const sqlContents = content.map((entry) => entry.sql);
-    const analyzeResult = await analyzeAndSort(sqlContents, {
-      externalProviders,
-    });
-
-    const { ordered, diagnostics } = analyzeResult;
-
-    // Step 2: Remap <input:i> to real file paths
-    const filePathMap = new Map<string, string>();
-    for (let i = 0; i < content.length; i += 1) {
-      filePathMap.set(`<input:${i}>`, content[i].filePath);
-    }
-
-    const remappedOrdered = ordered.map((node) => ({
-      ...node,
-      id: {
-        ...node.id,
-        filePath: filePathMap.get(node.id.filePath) ?? node.id.filePath,
-      },
-    }));
-
-    const remappedDiagnostics = diagnostics.map((d) => ({
-      ...d,
-      statementId: remapStatementId(d.statementId, filePathMap),
-    }));
-
-    if (ordered.length === 0) {
-      return {
-        apply: {
-          status: "success",
-          totalRounds: 0,
-          totalApplied: 0,
-          totalSkipped: 0,
-          rounds: [],
-        },
-        diagnostics: remappedDiagnostics,
-        totalStatements: 0,
-      };
-    }
-
-    // Step 3: Convert to statement entries and apply
-    const statements = toStatementEntries(remappedOrdered);
-
-    const applyResult = await roundApply({
-      pool,
-      statements,
-      maxRounds,
-      disableCheckFunctionBodies,
-      finalValidation: validateFunctionBodies,
-      onRoundComplete,
-    });
-
-    return {
-      apply: applyResult,
-      diagnostics: remappedDiagnostics,
-      totalStatements: remappedOrdered.length,
-    };
-  } finally {
-    if (closePool) {
-      await closePool();
-    }
-  }
+  return applyDeclarativeSchemaEffect(options).pipe(Effect.runPromise);
 }
 
 export type { SqlFileEntry } from "./discover-sql.ts";
@@ -213,11 +113,122 @@ export type { ApplyResult, RoundResult } from "./round-apply.ts";
 export const applyDeclarativeSchemaEffect = (
   options: DeclarativeApplyOptions,
 ): Effect.Effect<DeclarativeApplyResult, DeclarativeApplyError> =>
-  Effect.tryPromise({
-    try: () => applyDeclarativeSchema(options),
-    catch: (err) =>
-      new DeclarativeApplyError({
-        message: `applyDeclarativeSchema failed: ${err instanceof Error ? err.message : err}`,
-        cause: err,
-      }),
+  Effect.gen(function* () {
+    const {
+      content,
+      targetUrl,
+      pool: providedPool,
+      maxRounds = 100,
+      validateFunctionBodies = true,
+      disableCheckFunctionBodies = true,
+      onRoundComplete,
+    } = options;
+
+    if (content.length === 0) {
+      return emptyApplyResult([]);
+    }
+
+    const db = yield* resolveDatabaseEffect(targetUrl, providedPool);
+    const externalProviders = yield* extractCatalogProvidersEffect(db).pipe(
+      Effect.mapError(
+        (error) =>
+          new DeclarativeApplyError({
+            message: error.message,
+            cause: error,
+          }),
+      ),
+    );
+
+    const analyzeResult = yield* Effect.tryPromise({
+      try: () =>
+        analyzeAndSort(
+          content.map((entry) => entry.sql),
+          { externalProviders },
+        ),
+      catch: (error) =>
+        new DeclarativeApplyError({
+          message: `Failed to analyze declarative SQL: ${error instanceof Error ? error.message : String(error)}`,
+          cause: error,
+        }),
+    });
+
+    const { ordered, diagnostics } = analyzeResult;
+    const filePathMap = new Map<string, string>();
+    for (let i = 0; i < content.length; i += 1) {
+      filePathMap.set(`<input:${i}>`, content[i].filePath);
+    }
+
+    const remappedOrdered = ordered.map((node) => ({
+      ...node,
+      id: {
+        ...node.id,
+        filePath: filePathMap.get(node.id.filePath) ?? node.id.filePath,
+      },
+    }));
+
+    const remappedDiagnostics = diagnostics.map((diagnostic) => ({
+      ...diagnostic,
+      statementId: remapStatementId(diagnostic.statementId, filePathMap),
+    }));
+
+    if (ordered.length === 0) {
+      return emptyApplyResult(remappedDiagnostics);
+    }
+
+    const applyResult = yield* roundApplyEffect(db, {
+      statements: toStatementEntries(remappedOrdered),
+      maxRounds,
+      disableCheckFunctionBodies,
+      finalValidation: validateFunctionBodies,
+      onRoundComplete,
+    });
+
+    return {
+      apply: applyResult,
+      diagnostics: remappedDiagnostics,
+      totalStatements: remappedOrdered.length,
+    };
   });
+
+const emptyApplyResult = (
+  diagnostics: Diagnostic[],
+): DeclarativeApplyResult => ({
+  apply: {
+    status: "success",
+    totalRounds: 0,
+    totalApplied: 0,
+    totalSkipped: 0,
+    rounds: [],
+  },
+  diagnostics,
+  totalStatements: 0,
+});
+
+const resolveDatabaseEffect = (
+  targetUrl: string | undefined,
+  providedPool: Pool | DatabaseApi | undefined,
+): Effect.Effect<DatabaseApi, DeclarativeApplyError> => {
+  if (providedPool) {
+    return Effect.succeed(
+      "withConnection" in providedPool ? providedPool : wrapPool(providedPool),
+    );
+  }
+
+  if (!targetUrl) {
+    return Effect.fail(
+      new DeclarativeApplyError({
+        message: "Either targetUrl or pool must be provided",
+      }),
+    );
+  }
+
+  return Effect.scoped(makeScopedPool(targetUrl, { label: "target" })).pipe(
+    Effect.mapError(
+      (error) =>
+        new DeclarativeApplyError({
+          message: error.message,
+          cause: error,
+        }),
+    ),
+  );
+};

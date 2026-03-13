@@ -5,18 +5,22 @@
 import { Effect } from "effect";
 import type { Pool } from "pg";
 import { diffCatalogs } from "../catalog.diff.ts";
-import { extractCatalog } from "../catalog.model.ts";
+import { extractCatalogEffect } from "../catalog.model.ts";
 import type { DiffContext } from "../context.ts";
 import {
   AlreadyAppliedError,
-  CatalogExtractionError,
+  type CatalogExtractionError,
+  type ConnectionError,
+  type ConnectionTimeoutError,
   FingerprintMismatchError,
   InvalidPlanError,
   PlanApplyError,
+  type SslConfigError,
 } from "../errors.ts";
 import { buildPlanScopeFingerprint, hashStableIds } from "../fingerprint.ts";
 import { compileFilterDSL } from "../integrations/filter/dsl.ts";
-import { createManagedPool, endPool } from "../postgres-config.ts";
+import type { DatabaseApi } from "../services/database.ts";
+import { makeScopedPool, wrapPool } from "../services/database-live.ts";
 import { sortChanges } from "../sort/sort-changes.ts";
 import type { Plan } from "./types.ts";
 
@@ -31,7 +35,7 @@ interface ApplyPlanOptions {
   verifyPostApply?: boolean;
 }
 
-type ConnectionInput = string | Pool;
+type ConnectionInput = string | Pool | DatabaseApi;
 
 /**
  * Check if a statement is a session configuration statement (standalone SET statements).
@@ -52,133 +56,46 @@ export async function applyPlan(
   target: ConnectionInput,
   options: ApplyPlanOptions = {},
 ): Promise<ApplyPlanResult> {
-  if (!plan.statements || plan.statements.length === 0) {
-    return {
-      status: "invalid_plan",
-      message: "Plan contains no SQL statements to execute.",
-    };
-  }
+  const result = await applyPlanEffect(plan, source, target, options).pipe(
+    Effect.result,
+    Effect.runPromise,
+  );
 
-  let currentPool: Pool;
-  let desiredPool: Pool;
-  let shouldCloseCurrent = false;
-  let shouldCloseDesired = false;
-
-  if (typeof source === "string") {
-    const managed = await createManagedPool(source, {
-      role: plan.role,
-      label: "source",
-    });
-    currentPool = managed.pool;
-    shouldCloseCurrent = true;
-  } else {
-    currentPool = source;
-  }
-
-  if (typeof target === "string") {
-    const managed = await createManagedPool(target, {
-      role: plan.role,
-      label: "target",
-    });
-    desiredPool = managed.pool;
-    shouldCloseDesired = true;
-  } else {
-    desiredPool = target;
-  }
-
-  try {
-    // Recompute stableIds and fingerprints from current and desired catalogs
-    const [currentCatalog, desiredCatalog] = await Promise.all([
-      extractCatalog(currentPool),
-      extractCatalog(desiredPool),
-    ]);
-
-    const changes = diffCatalogs(currentCatalog, desiredCatalog);
-    const ctx: DiffContext = {
-      mainCatalog: currentCatalog,
-      branchCatalog: desiredCatalog,
-    };
-
-    // Apply the same filter that was used to create the plan (if any)
-    let filteredChanges = changes;
-    if (plan.filter) {
-      const filterFn = compileFilterDSL(plan.filter);
-      filteredChanges = filteredChanges.filter((change) => filterFn(change));
-    }
-
-    const sortedChanges = sortChanges(ctx, filteredChanges);
-    if (sortedChanges.length === 0) {
-      return { status: "already_applied" };
-    }
-    const { hash: fingerprintFrom, stableIds } = buildPlanScopeFingerprint(
-      ctx.mainCatalog,
-      sortedChanges,
-    );
-    // We intentionally recompute target fingerprint only after applying.
-
-    // Pre-apply fingerprint validation
-    if (fingerprintFrom === plan.target.fingerprint) {
-      return { status: "already_applied" };
-    }
-
-    if (fingerprintFrom !== plan.source.fingerprint) {
-      return {
-        status: "fingerprint_mismatch",
-        current: fingerprintFrom,
-        expected: plan.source.fingerprint,
-      };
-    }
-
-    // Execute the SQL script
-    // TODO: mark statements that can't be run within a transaction
-    const statements = plan.statements;
-
-    const script = (() => {
-      const joined = statements.join(";\n");
-      return joined.endsWith(";") ? joined : `${joined};`;
-    })();
-
-    try {
-      await currentPool.query(script);
-    } catch (error) {
-      return { status: "failed", error, script };
-    }
-
-    const warnings: string[] = [];
-
-    if (options.verifyPostApply !== false) {
-      try {
-        const updatedCatalog = await extractCatalog(currentPool);
-        const updatedFingerprint = hashStableIds(updatedCatalog, stableIds);
-        if (updatedFingerprint !== plan.target.fingerprint) {
-          warnings.push(
-            "Post-apply fingerprint does not match the plan target fingerprint.",
-          );
-        }
-      } catch (error) {
-        warnings.push(
-          `Could not verify post-apply fingerprint: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
-    // Count only actual changes, excluding session configuration statements
-    const changeStatements = statements.filter(
-      (stmt) => !isSessionStatement(stmt),
-    );
-
+  if (result._tag === "Success") {
     return {
       status: "applied",
-      statements: changeStatements.length,
-      warnings: warnings.length ? warnings : undefined,
+      statements: result.success.statements,
+      warnings: result.success.warnings,
     };
-  } finally {
-    const closers: Promise<unknown>[] = [];
-    if (shouldCloseCurrent) closers.push(endPool(currentPool));
-    if (shouldCloseDesired) closers.push(endPool(desiredPool));
-    if (closers.length) {
-      await Promise.all(closers);
-    }
+  }
+
+  const error = result.failure;
+  switch (error._tag) {
+    case "InvalidPlanError":
+      return {
+        status: "invalid_plan",
+        message: error.message,
+      };
+    case "FingerprintMismatchError":
+      return {
+        status: "fingerprint_mismatch",
+        current: error.current,
+        expected: error.expected,
+      };
+    case "AlreadyAppliedError":
+      return { status: "already_applied" };
+    case "PlanApplyError":
+      return {
+        status: "failed",
+        error: error.cause,
+        script: error.script,
+      };
+    default:
+      return {
+        status: "failed",
+        error,
+        script: plan.statements.join(";\n"),
+      };
   }
 }
 
@@ -203,35 +120,129 @@ export const applyPlanEffect = (
   | AlreadyAppliedError
   | PlanApplyError
   | CatalogExtractionError
+  | ConnectionError
+  | ConnectionTimeoutError
+  | SslConfigError
 > =>
   Effect.gen(function* () {
-    const result = yield* Effect.tryPromise({
-      try: () => applyPlan(plan, source, target, options),
-      catch: (err) =>
-        new CatalogExtractionError({
-          message: `applyPlan failed: ${err instanceof Error ? err.message : err}`,
-          cause: err,
-        }),
-    });
-    switch (result.status) {
-      case "invalid_plan":
-        return yield* new InvalidPlanError({ message: result.message });
-      case "fingerprint_mismatch":
-        return yield* new FingerprintMismatchError({
-          current: result.current,
-          expected: result.expected,
-        });
-      case "already_applied":
-        return yield* new AlreadyAppliedError();
-      case "failed":
-        return yield* new PlanApplyError({
-          cause: result.error,
-          script: result.script,
-        });
-      case "applied":
-        return {
-          statements: result.statements,
-          warnings: result.warnings,
-        };
+    if (!plan.statements || plan.statements.length === 0) {
+      return yield* new InvalidPlanError({
+        message: "Plan contains no SQL statements to execute.",
+      });
     }
+
+    const currentDb = yield* resolveDatabaseEffect(source, "source", plan.role);
+    const desiredDb = yield* resolveDatabaseEffect(target, "target", plan.role);
+
+    const [currentCatalog, desiredCatalog] = yield* Effect.all([
+      extractCatalogEffect(currentDb),
+      extractCatalogEffect(desiredDb),
+    ]);
+
+    const changes = diffCatalogs(currentCatalog, desiredCatalog);
+    const ctx: DiffContext = {
+      mainCatalog: currentCatalog,
+      branchCatalog: desiredCatalog,
+    };
+
+    let filteredChanges = changes;
+    if (plan.filter) {
+      const filterFn = compileFilterDSL(plan.filter);
+      filteredChanges = filteredChanges.filter((change) => filterFn(change));
+    }
+
+    const sortedChanges = sortChanges(ctx, filteredChanges);
+    if (sortedChanges.length === 0) {
+      return yield* new AlreadyAppliedError();
+    }
+
+    const { hash: fingerprintFrom, stableIds } = buildPlanScopeFingerprint(
+      ctx.mainCatalog,
+      sortedChanges,
+    );
+
+    if (fingerprintFrom === plan.target.fingerprint) {
+      return yield* new AlreadyAppliedError();
+    }
+
+    if (fingerprintFrom !== plan.source.fingerprint) {
+      return yield* new FingerprintMismatchError({
+        current: fingerprintFrom,
+        expected: plan.source.fingerprint,
+      });
+    }
+
+    const statements = plan.statements;
+    const script = joinStatements(statements);
+
+    yield* currentDb.query(script).pipe(
+      Effect.mapError(
+        (error) =>
+          new PlanApplyError({
+            cause: error,
+            script,
+          }),
+      ),
+    );
+
+    const warnings: string[] = [];
+    if (options.verifyPostApply !== false) {
+      const verification = yield* extractCatalogEffect(currentDb).pipe(
+        Effect.result,
+      );
+      if (verification._tag === "Failure") {
+        warnings.push(
+          `Could not verify post-apply fingerprint: ${verification.failure.message}`,
+        );
+      } else {
+        const updatedFingerprint = hashStableIds(
+          verification.success,
+          stableIds,
+        );
+        if (updatedFingerprint !== plan.target.fingerprint) {
+          warnings.push(
+            "Post-apply fingerprint does not match the plan target fingerprint.",
+          );
+        }
+      }
+    }
+
+    return {
+      statements: statements.filter(
+        (statement) => !isSessionStatement(statement),
+      ).length,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
   });
+
+const resolveDatabaseEffect = (
+  input: ConnectionInput,
+  label: "source" | "target",
+  role: string | undefined,
+): Effect.Effect<
+  DatabaseApi,
+  | CatalogExtractionError
+  | ConnectionError
+  | ConnectionTimeoutError
+  | SslConfigError
+> => {
+  if (typeof input === "string") {
+    return Effect.scoped(
+      makeScopedPool(input, {
+        role,
+        label,
+      }),
+    );
+  }
+
+  if ("withConnection" in input) {
+    return Effect.succeed(input);
+  }
+
+  return Effect.succeed(wrapPool(input));
+};
+
+const joinStatements = (statements: ReadonlyArray<string>): string => {
+  const joined = statements.join(";\n");
+  return joined.endsWith(";") ? joined : `${joined};`;
+};

@@ -8,8 +8,11 @@
  * 4. Optional final validation pass for function bodies
  */
 
+import { Effect } from "effect";
 import type { Pool, PoolClient } from "pg";
+import { DeclarativeApplyError } from "../errors.ts";
 import { getPgDeltaLogger } from "../logging.ts";
+import type { DatabaseApi } from "../services/database.ts";
 
 const logger = getPgDeltaLogger("declarative-apply");
 
@@ -88,6 +91,12 @@ interface RoundApplyOptions {
   finalValidation?: boolean;
   /** Progress callback fired after each round */
   onRoundComplete?: (round: RoundResult) => void;
+}
+
+interface QueryClient {
+  readonly query: <R = Record<string, unknown>>(
+    sql: string,
+  ) => Promise<{ rows: R[]; rowCount: number | null }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,8 +255,61 @@ function parsePgPosition(pos: string | number | undefined): number | undefined {
 export async function roundApply(
   options: RoundApplyOptions,
 ): Promise<ApplyResult> {
+  const { pool } = options;
+  const client: PoolClient = await pool.connect();
+
+  try {
+    return await roundApplyWithClient(
+      {
+        query: ((sql: string) => client.query(sql)) as QueryClient["query"],
+      },
+      options,
+    );
+  } finally {
+    client.release();
+  }
+}
+
+export const roundApplyEffect = (
+  db: DatabaseApi,
+  options: Omit<RoundApplyOptions, "pool">,
+): Effect.Effect<ApplyResult, DeclarativeApplyError> =>
+  db
+    .withConnection((connection) =>
+      Effect.tryPromise({
+        try: () =>
+          roundApplyWithClient(
+            {
+              query: ((sql: string) =>
+                connection
+                  .query(sql)
+                  .pipe(Effect.runPromise)) as QueryClient["query"],
+            },
+            options,
+          ),
+        catch: (error) =>
+          new DeclarativeApplyError({
+            message: `roundApply failed: ${error instanceof Error ? error.message : String(error)}`,
+            cause: error,
+          }),
+      }),
+    )
+    .pipe(
+      Effect.mapError((error) =>
+        error instanceof DeclarativeApplyError
+          ? error
+          : new DeclarativeApplyError({
+              message: error.message,
+              cause: error,
+            }),
+      ),
+    );
+
+async function roundApplyWithClient(
+  client: QueryClient,
+  options: Omit<RoundApplyOptions, "pool">,
+): Promise<ApplyResult> {
   const {
-    pool,
     statements,
     maxRounds = 100,
     disableCheckFunctionBodies = true,
@@ -269,15 +331,13 @@ export async function roundApply(
   // Track applied function/procedure statements for final validation
   const appliedFunctions: StatementEntry[] = [];
 
-  const client: PoolClient = await pool.connect();
+  // Disable function body checks to avoid false failures from
+  // functions referencing not-yet-created objects
+  if (disableCheckFunctionBodies) {
+    await client.query("SET check_function_bodies = off");
+  }
 
   try {
-    // Disable function body checks to avoid false failures from
-    // functions referencing not-yet-created objects
-    if (disableCheckFunctionBodies) {
-      await client.query("SET check_function_bodies = off");
-    }
-
     for (let round = 1; round <= maxRounds && pending.length > 0; round++) {
       logger.debug("round {round}: {pending} pending", {
         round,
@@ -449,7 +509,6 @@ export async function roundApply(
       };
     }
 
-    // Final validation pass: re-run functions with check_function_bodies = on
     let validationErrors: StatementError[] | undefined;
     if (finalValidation && appliedFunctions.length > 0) {
       validationErrors = await validateFunctionBodies(client, appliedFunctions);
@@ -484,7 +543,6 @@ export async function roundApply(
         // Best-effort restore; connection is being released anyway
       }
     }
-    client.release();
   }
 }
 
@@ -513,7 +571,7 @@ export function rewriteAsOrReplace(sql: string): string {
  *   blocking validation of the remaining functions.
  */
 async function validateFunctionBodies(
-  client: PoolClient,
+  client: QueryClient,
   functions: StatementEntry[],
 ): Promise<StatementError[]> {
   const errors: StatementError[] = [];

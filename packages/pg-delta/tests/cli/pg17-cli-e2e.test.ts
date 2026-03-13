@@ -1,10 +1,10 @@
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { withDb } from "../utils.ts";
 import { normalizeCliOutput } from "./helpers/normalize-cli-output.ts";
 import { runCli } from "./helpers/run-cli.ts";
-import { withDb } from "../utils.ts";
 
 const packageRoot = join(import.meta.dir, "..", "..");
 const functionValidationFixturePath = join(
@@ -90,9 +90,7 @@ describe("pgdelta CLI e2e (pg17)", () => {
 
       expect(applyResult.exitCode).toBe(0);
       expect(applyResult.stdout).toBe("");
-      expect(applyResult.stderr).toContain(
-        "Applying 1 changes to database...",
-      );
+      expect(applyResult.stderr).toContain("Applying 1 changes to database...");
       expect(applyResult.stderr).toContain("Successfully applied all changes.");
       const schemaExists = await db.main.query(
         "select 1 from pg_namespace where nspname = 'app'",
@@ -216,7 +214,9 @@ Apply these changes (y/N) "
       expect(applyResult.stderr).toContain("Analyzing SQL files");
       expect(applyResult.stderr).toContain("Statements:");
       expect(applyResult.stderr).toContain("Rounds:");
-      expect(applyResult.stderr).toContain("All statements applied successfully.");
+      expect(applyResult.stderr).toContain(
+        "All statements applied successfully.",
+      );
 
       const schemaExists = await db.main.query(
         "select 1 from pg_namespace where nspname = 'declarative_app'",
@@ -269,7 +269,9 @@ Apply these changes (y/N) "
 "
 `);
 
-      expect(JSON.parse(await readFile(planPath, "utf8"))).toHaveProperty("risk");
+      expect(JSON.parse(await readFile(planPath, "utf8"))).toHaveProperty(
+        "risk",
+      );
     }),
   );
 
