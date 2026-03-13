@@ -21,11 +21,25 @@ const parseSslConfigMock = mock(
 );
 const endPoolMock = mock(async () => {});
 
-let connectImpl: () => Promise<{ release: () => void }>;
-const createPoolMock = mock(() => ({
-  connect: () => connectImpl(),
-  query: async () => ({ rows: [], rowCount: 0 }),
-}));
+type MockConnection = { release: () => void };
+type ConnectBehavior = () => Promise<MockConnection>;
+
+const connectBehaviors: ConnectBehavior[] = [];
+const enqueueConnectBehavior = (behavior: ConnectBehavior): void => {
+  connectBehaviors.push(behavior);
+};
+
+const createPoolMock = mock(() => {
+  const behavior = connectBehaviors.shift();
+  if (behavior === undefined) {
+    throw new Error("No connect behavior configured for createPool call");
+  }
+
+  return {
+    connect: () => behavior(),
+    query: async () => ({ rows: [], rowCount: 0 }),
+  };
+});
 
 mock.module("../plan/ssl-config.ts", () => ({
   parseSslConfig: parseSslConfigMock,
@@ -56,17 +70,18 @@ describe("makeScopedPool", () => {
     }));
     createPoolMock.mockClear();
     endPoolMock.mockClear();
+    connectBehaviors.length = 0;
   });
 
   test("retries transient connection failures before succeeding", async () => {
     let attempts = 0;
-    connectImpl = async () => {
+    enqueueConnectBehavior(async () => {
       attempts += 1;
       if (attempts < 3) {
         throw new Error("connection reset");
       }
       return { release: () => {} };
-    };
+    });
 
     await Effect.scoped(makeScopedPool("postgresql://example/db")).pipe(
       Effect.runPromise,
@@ -81,7 +96,7 @@ describe("makeScopedPool", () => {
     parseSslConfigMock.mockImplementationOnce(async () => {
       throw new Error("bad sslmode");
     });
-    connectImpl = async () => ({ release: () => {} });
+    enqueueConnectBehavior(async () => ({ release: () => {} }));
 
     const result = await Effect.scoped(
       makeScopedPool("postgresql://example/db", { label: "source" }),
@@ -110,7 +125,7 @@ describe("makeScopedPool", () => {
         },
       };
     });
-    connectImpl = async () => ({ release: () => {} });
+    enqueueConnectBehavior(async () => ({ release: () => {} }));
 
     const runtimeConfig = Layer.succeed(PgRuntimeConfigService, {
       poolMax: 5,
@@ -140,10 +155,10 @@ describe("makeScopedPool", () => {
 
   test("retries timeouts and eventually fails with ConnectionTimeoutError", async () => {
     let attempts = 0;
-    connectImpl = () => {
+    enqueueConnectBehavior(() => {
       attempts += 1;
       return new Promise(() => {});
-    };
+    });
 
     const result = await Effect.scoped(
       makeScopedPoolEffect("postgresql://example/db", { label: "target" }),
