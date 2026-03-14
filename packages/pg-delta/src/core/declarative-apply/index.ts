@@ -93,12 +93,6 @@ function remapStatementId(
  * 3. Apply statements round-by-round to the target database
  * 4. Optionally validate function bodies in a final pass
  */
-export async function applyDeclarativeSchemaPromise(
-  options: DeclarativeApplyOptions,
-): Promise<DeclarativeApplyResult> {
-  return applyDeclarativeSchema(options).pipe(Effect.runPromise);
-}
-
 export type { SqlFileEntry } from "./discover-sql.ts";
 
 // Re-export file discovery for programmatic callers (e.g. Supabase CLI edge-runtime templates)

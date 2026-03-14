@@ -13,12 +13,11 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { diffCatalogs } from "../../src/core/catalog.diff.ts";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
-import { applyDeclarativeSchemaPromise as applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
 import { exportDeclarativeSchema } from "../../src/core/export/index.ts";
-import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
 import { wrapPool } from "../../src/core/services/database-live.ts";
 import { sortChanges } from "../../src/core/sort/sort-changes.ts";
 import { POSTGRES_VERSIONS, type PostgresVersion } from "../constants.ts";
+import { applyDeclarativeSchema, createPlan } from "../promise-helpers.ts";
 import { withDb } from "../utils.ts";
 
 const OVERLOADED_FUNCTIONS_SQL = `

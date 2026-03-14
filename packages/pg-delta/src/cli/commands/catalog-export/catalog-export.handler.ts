@@ -1,26 +1,22 @@
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, Option } from "effect";
 import {
   serializeCatalog,
   stringifyCatalogSnapshot,
-} from "../../core/catalog.snapshot.ts";
-import { extractCatalog, makeScopedDatabase } from "../../effect.ts";
-import { CliExitError } from "../errors.ts";
-import { Output } from "../output/output.service.ts";
+} from "../../../core/catalog.snapshot.ts";
+import { extractCatalog, makeScopedDatabase } from "../../../effect.ts";
+import { CliExitError } from "../../errors.ts";
+import { Output } from "../../output/output.service.ts";
 
-export interface CatalogExportHandlerArgs {
+export const handleCatalogExport = Effect.fnUntraced(function* (flags: {
   readonly target: string;
   readonly output: string;
-  readonly role?: string;
-}
-
-export const handleCatalogExport = Effect.fnUntraced(function* (
-  args: CatalogExportHandlerArgs,
-) {
+  readonly role: Option.Option<string>;
+}) {
   const fs = yield* FileSystem.FileSystem;
   const output = yield* Output;
 
-  const db = yield* makeScopedDatabase(args.target, {
-    role: args.role,
+  const db = yield* makeScopedDatabase(flags.target, {
+    role: Option.getOrUndefined(flags.role),
     label: "target",
   }).pipe(
     Effect.mapError(
@@ -43,7 +39,7 @@ export const handleCatalogExport = Effect.fnUntraced(function* (
   const snapshot = serializeCatalog(catalog);
   const json = stringifyCatalogSnapshot(snapshot);
 
-  yield* fs.writeFileString(args.output, json).pipe(
+  yield* fs.writeFileString(flags.output, json).pipe(
     Effect.mapError(
       (error) =>
         new CliExitError({
@@ -52,5 +48,5 @@ export const handleCatalogExport = Effect.fnUntraced(function* (
         }),
     ),
   );
-  yield* output.success(`Catalog snapshot written to ${args.output}`);
+  yield* output.success(`Catalog snapshot written to ${flags.output}`);
 });

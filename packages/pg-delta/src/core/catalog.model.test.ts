@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createEmptyCatalog } from "./catalog.model.ts";
+import { Effect } from "effect";
+import { createEmptyCatalog as _createEmptyCatalog } from "./catalog.model.ts";
+
+const createEmptyCatalog = (version: number, currentUser: string) =>
+  Effect.runPromise(_createEmptyCatalog(version, currentUser));
 
 describe("createEmptyCatalog", () => {
   test("PG < 15 returns a minimal catalog with only a public schema", async () => {

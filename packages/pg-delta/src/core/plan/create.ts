@@ -13,11 +13,11 @@ import {
 } from "../catalog.model.ts";
 import type { Change } from "../change.types.ts";
 import type { DiffContext } from "../context.ts";
-import {
+import type {
   CatalogExtractionError,
-  type ConnectionError,
-  type ConnectionTimeoutError,
-  type SslConfigError,
+  ConnectionError,
+  ConnectionTimeoutError,
+  SslConfigError,
 } from "../errors.ts";
 import { buildPlanScopeFingerprint, hashStableIds } from "../fingerprint.ts";
 import {
@@ -45,31 +45,6 @@ import type { CreatePlanOptions, Plan } from "./types.ts";
  * an already-resolved Catalog (e.g. deserialized from a snapshot file).
  */
 export type CatalogInput = string | Pool | DatabaseApi | Catalog;
-
-/**
- * Create a migration plan by comparing two catalog states.
- *
- * Each input can be:
- * - A postgres connection URL (string) -- a pool is created and catalog extracted
- * - An existing pg Pool -- catalog is extracted directly
- * - A Catalog instance -- used as-is (e.g. from a deserialized snapshot)
- *
- * When `source` is `null`, a minimal empty catalog (`createEmptyCatalog`) is
- * used as the baseline. For a more accurate baseline, pass a Catalog
- * deserialized from a snapshot of `template1` or another reference database.
- *
- * @param source - Source catalog input (current state), or null for empty baseline
- * @param target - Target catalog input (desired state)
- * @param options - Optional configuration
- * @returns A Plan if there are changes, null if databases are identical
- */
-export async function createPlanPromise(
-  source: CatalogInput | null,
-  target: CatalogInput,
-  options: CreatePlanOptions = {},
-): Promise<{ plan: Plan; sortedChanges: Change[]; ctx: DiffContext } | null> {
-  return createPlan(source, target, options).pipe(Effect.runPromise);
-}
 
 /**
  * Build a plan (and supporting artifacts) from already extracted catalogs.
@@ -346,15 +321,7 @@ export const createPlan = (
     const fromCatalog =
       source !== null
         ? yield* resolveCatalog(source, "source", options)
-        : yield* Effect.tryPromise({
-            try: () =>
-              createEmptyCatalog(toCatalog.version, toCatalog.currentUser),
-            catch: (error) =>
-              new CatalogExtractionError({
-                message: `Failed to create empty catalog: ${error instanceof Error ? error.message : String(error)}`,
-                cause: error,
-              }),
-          });
+        : yield* createEmptyCatalog(toCatalog.version, toCatalog.currentUser);
 
     return buildPlanForCatalogs(fromCatalog, toCatalog, options);
   });

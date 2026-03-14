@@ -3,9 +3,8 @@
  * Matches pg-topo's discovery order for deterministic statement ordering.
  */
 
-import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem } from "effect";
 import { FileDiscoveryError } from "../errors.ts";
 
 export interface SqlFileEntry {
@@ -16,28 +15,48 @@ export interface SqlFileEntry {
 }
 
 /**
- * Recursively collect .sql files in a directory. Entries sorted by name,
- * then full paths sorted for deterministic order (matches pg-topo discover).
+ * Recursively collect .sql files in a directory using Effect FileSystem.
+ * Entries sorted by name, then full paths sorted for deterministic order (matches pg-topo discover).
  */
-async function readSqlFilesInDirectory(
+const readSqlFilesInDirectory = (
+  fs: FileSystem.FileSystem,
   directoryPath: string,
   outFiles: Set<string>,
-): Promise<void> {
-  const entries = await readdir(directoryPath, { withFileTypes: true });
-  entries.sort((left, right) => left.name.localeCompare(right.name));
+): Effect.Effect<void, FileDiscoveryError> =>
+  Effect.gen(function* () {
+    const entries = yield* fs.readDirectory(directoryPath).pipe(
+      Effect.mapError(
+        (err) =>
+          new FileDiscoveryError({
+            message: `Cannot read directory '${directoryPath}': ${err.message}`,
+            path: directoryPath,
+          }),
+      ),
+    );
+    const sorted = [...entries].sort((a, b) => a.localeCompare(b));
 
-  for (const entry of entries) {
-    const fullPath = path.join(directoryPath, entry.name);
-    if (entry.isDirectory()) {
-      await readSqlFilesInDirectory(fullPath, outFiles);
-      continue;
-    }
+    for (const name of sorted) {
+      const fullPath = path.join(directoryPath, name);
+      const info = yield* fs.stat(fullPath).pipe(
+        Effect.mapError(
+          (err) =>
+            new FileDiscoveryError({
+              message: `Cannot stat '${fullPath}': ${err.message}`,
+              path: fullPath,
+            }),
+        ),
+      );
 
-    if (entry.isFile() && fullPath.toLowerCase().endsWith(".sql")) {
-      outFiles.add(path.resolve(fullPath));
+      if (info.type === "Directory") {
+        yield* readSqlFilesInDirectory(fs, fullPath, outFiles);
+        continue;
+      }
+
+      if (info.type === "File" && fullPath.toLowerCase().endsWith(".sql")) {
+        outFiles.add(path.resolve(fullPath));
+      }
     }
-  }
-}
+  });
 
 /**
  * Stable relative path: path.relative(basePath, absolutePath) with forward slashes.
@@ -49,73 +68,68 @@ function toStablePath(absolutePath: string, basePath: string): string {
 /**
  * Load all .sql files under schemaPath (a single .sql file or a directory).
  * Returns entries in the same order as pg-topo's discover (sorted by full path).
- *
- * @throws If schemaPath does not exist, is not a file/directory, or any file cannot be read.
- *         Error message includes path and code (e.g. ENOENT, EACCES) for CLI to display.
  */
-export async function loadDeclarativeSchemaPromise(
+export const loadDeclarativeSchema = (
   schemaPath: string,
-): Promise<SqlFileEntry[]> {
-  const resolvedRoot = path.resolve(schemaPath);
+): Effect.Effect<SqlFileEntry[], FileDiscoveryError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const resolvedRoot = path.resolve(schemaPath);
 
-  let rootStats: Awaited<ReturnType<typeof stat>>;
-  try {
-    rootStats = await stat(resolvedRoot);
-  } catch (err) {
-    const code =
-      err && typeof err === "object" && "code" in err
-        ? String((err as NodeJS.ErrnoException).code)
-        : "UNKNOWN";
-    throw new Error(`Cannot access '${schemaPath}': ${code}`);
-  }
+    const rootStat = yield* fs.stat(resolvedRoot).pipe(
+      Effect.mapError(
+        (err) =>
+          new FileDiscoveryError({
+            message: `Cannot access '${schemaPath}': ${err.message}`,
+            path: schemaPath,
+          }),
+      ),
+    );
 
-  let files: string[];
-  let basePath: string;
+    let files: string[];
+    let basePath: string;
 
-  if (rootStats.isFile()) {
-    if (!resolvedRoot.toLowerCase().endsWith(".sql")) {
-      throw new Error(`Path is not a .sql file: '${schemaPath}'`);
+    if (rootStat.type === "File") {
+      if (!resolvedRoot.toLowerCase().endsWith(".sql")) {
+        return yield* Effect.fail(
+          new FileDiscoveryError({
+            message: `Path is not a .sql file: '${schemaPath}'`,
+            path: schemaPath,
+          }),
+        );
+      }
+      files = [resolvedRoot];
+      basePath = path.dirname(resolvedRoot);
+    } else if (rootStat.type === "Directory") {
+      const fileSet = new Set<string>();
+      yield* readSqlFilesInDirectory(fs, resolvedRoot, fileSet);
+      files = [...fileSet].sort((a, b) => a.localeCompare(b));
+      basePath = resolvedRoot;
+    } else {
+      return yield* Effect.fail(
+        new FileDiscoveryError({
+          message: `Path is not a file or directory: '${schemaPath}'`,
+          path: schemaPath,
+        }),
+      );
     }
-    files = [resolvedRoot];
-    basePath = path.dirname(resolvedRoot);
-  } else if (rootStats.isDirectory()) {
-    const fileSet = new Set<string>();
-    await readSqlFilesInDirectory(resolvedRoot, fileSet);
-    files = [...fileSet].sort((a, b) => a.localeCompare(b));
-    basePath = resolvedRoot;
-  } else {
-    throw new Error(`Path is not a file or directory: '${schemaPath}'`);
-  }
 
-  const entries: SqlFileEntry[] = [];
-  for (const filePath of files) {
-    try {
-      const sql = await readFile(filePath, "utf-8");
+    const entries: SqlFileEntry[] = [];
+    for (const filePath of files) {
+      const sql = yield* fs.readFileString(filePath).pipe(
+        Effect.mapError((err) => {
+          const relative = toStablePath(filePath, basePath);
+          return new FileDiscoveryError({
+            message: `Cannot read file '${relative}': ${err.message}`,
+            path: relative,
+          });
+        }),
+      );
       entries.push({
         filePath: toStablePath(filePath, basePath),
         sql,
       });
-    } catch (err) {
-      const code =
-        err && typeof err === "object" && "code" in err
-          ? String((err as NodeJS.ErrnoException).code)
-          : "UNKNOWN";
-      const relative = toStablePath(filePath, basePath);
-      throw new Error(`Cannot read file '${relative}': ${code}`);
     }
-  }
 
-  return entries;
-}
-
-export const loadDeclarativeSchema = (
-  schemaPath: string,
-): Effect.Effect<SqlFileEntry[], FileDiscoveryError> =>
-  Effect.tryPromise({
-    try: () => loadDeclarativeSchemaPromise(schemaPath),
-    catch: (err) =>
-      new FileDiscoveryError({
-        message: `loadDeclarativeSchema failed: ${err instanceof Error ? err.message : err}`,
-        path: schemaPath,
-      }),
+    return entries;
   });

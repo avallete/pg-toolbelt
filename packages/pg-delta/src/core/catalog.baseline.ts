@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { Catalog } from "./catalog.ts";
 import { Schema } from "./objects/schema/schema.model.ts";
 
@@ -5,29 +6,35 @@ import { Schema } from "./objects/schema/schema.model.ts";
 let _pg1516Baseline: Catalog | null = null;
 let _pg17Baseline: Catalog | null = null;
 
-async function loadBaselineJson(): Promise<Record<string, unknown>> {
+const loadBaselineJson = Effect.promise(async () => {
   const mod = await import(
     "./fixtures/empty-catalogs/postgres-15-16-baseline.json"
   );
   return mod.default as Record<string, unknown>;
-}
+});
 
-async function getPg1516Baseline(): Promise<Catalog> {
-  if (!_pg1516Baseline) {
-    const { deserializeCatalog } = await import("./catalog.snapshot.ts");
-    const json = await loadBaselineJson();
+const getPg1516Baseline: Effect.Effect<Catalog> = Effect.suspend(() => {
+  if (_pg1516Baseline) return Effect.succeed(_pg1516Baseline);
+  return Effect.gen(function* () {
+    const { deserializeCatalog } = yield* Effect.promise(
+      () => import("./catalog.snapshot.ts"),
+    );
+    const json = yield* loadBaselineJson;
     _pg1516Baseline = deserializeCatalog(json);
-  }
-  return _pg1516Baseline;
-}
+    return _pg1516Baseline;
+  });
+});
 
-async function getPg17Baseline(): Promise<Catalog> {
-  if (!_pg17Baseline) {
-    const { deserializeCatalog } = await import("./catalog.snapshot.ts");
+const getPg17Baseline: Effect.Effect<Catalog> = Effect.suspend(() => {
+  if (_pg17Baseline) return Effect.succeed(_pg17Baseline);
+  return Effect.gen(function* () {
+    const { deserializeCatalog } = yield* Effect.promise(
+      () => import("./catalog.snapshot.ts"),
+    );
     // PG 17 is identical to PG 15-16 except for a single addition:
     // the MAINTAIN privilege on default relation (objtype "r") privileges.
     // We patch the 15-16 baseline to avoid shipping a second full JSON file.
-    const json = await loadBaselineJson();
+    const json = yield* loadBaselineJson;
     const patched = structuredClone(json);
     const roles = patched.roles as
       | Record<string, Record<string, unknown>>
@@ -47,8 +54,10 @@ async function getPg17Baseline(): Promise<Catalog> {
           (p) => p.privilege === "INSERT",
         );
         if (insertIdx === -1) {
-          throw new Error(
-            "PG17 baseline patch failed: INSERT privilege not found in default relation privileges",
+          return yield* Effect.die(
+            new Error(
+              "PG17 baseline patch failed: INSERT privilege not found in default relation privileges",
+            ),
           );
         }
         relPrivs.privileges.splice(insertIdx + 1, 0, {
@@ -58,9 +67,9 @@ async function getPg17Baseline(): Promise<Catalog> {
       }
     }
     _pg17Baseline = deserializeCatalog(patched);
-  }
-  return _pg17Baseline;
-}
+    return _pg17Baseline;
+  });
+});
 
 /**
  * Create a baseline catalog representing a fresh PostgreSQL database.
@@ -74,55 +83,56 @@ async function getPg17Baseline(): Promise<Catalog> {
  * database using `serializeCatalog` and pass the deserialized result as source
  * to `createPlan`.
  */
-export async function createEmptyCatalog(
+export const createEmptyCatalog = (
   version: number,
   currentUser: string,
-): Promise<Catalog> {
-  if (version >= 170000) {
-    const baseline = await getPg17Baseline();
-    return new Catalog({ ...baseline, version, currentUser });
-  }
-  if (version >= 150000) {
-    const baseline = await getPg1516Baseline();
-    return new Catalog({ ...baseline, version, currentUser });
-  }
+): Effect.Effect<Catalog> =>
+  Effect.gen(function* () {
+    if (version >= 170000) {
+      const baseline = yield* getPg17Baseline;
+      return new Catalog({ ...baseline, version, currentUser });
+    }
+    if (version >= 150000) {
+      const baseline = yield* getPg1516Baseline;
+      return new Catalog({ ...baseline, version, currentUser });
+    }
 
-  const publicSchema = new Schema({
-    name: "public",
-    owner: currentUser,
-    comment: "standard public schema",
-    privileges: [],
-  });
+    const publicSchema = new Schema({
+      name: "public",
+      owner: currentUser,
+      comment: "standard public schema",
+      privileges: [],
+    });
 
-  return new Catalog({
-    aggregates: {},
-    collations: {},
-    compositeTypes: {},
-    domains: {},
-    enums: {},
-    extensions: {},
-    procedures: {},
-    indexes: {},
-    materializedViews: {},
-    subscriptions: {},
-    publications: {},
-    rlsPolicies: {},
-    roles: {},
-    schemas: { [publicSchema.stableId]: publicSchema },
-    sequences: {},
-    tables: {},
-    triggers: {},
-    eventTriggers: {},
-    rules: {},
-    ranges: {},
-    views: {},
-    foreignDataWrappers: {},
-    servers: {},
-    userMappings: {},
-    foreignTables: {},
-    depends: [],
-    indexableObjects: {},
-    version,
-    currentUser,
+    return new Catalog({
+      aggregates: {},
+      collations: {},
+      compositeTypes: {},
+      domains: {},
+      enums: {},
+      extensions: {},
+      procedures: {},
+      indexes: {},
+      materializedViews: {},
+      subscriptions: {},
+      publications: {},
+      rlsPolicies: {},
+      roles: {},
+      schemas: { [publicSchema.stableId]: publicSchema },
+      sequences: {},
+      tables: {},
+      triggers: {},
+      eventTriggers: {},
+      rules: {},
+      ranges: {},
+      views: {},
+      foreignDataWrappers: {},
+      servers: {},
+      userMappings: {},
+      foreignTables: {},
+      depends: [],
+      indexableObjects: {},
+      version,
+      currentUser,
+    });
   });
-}

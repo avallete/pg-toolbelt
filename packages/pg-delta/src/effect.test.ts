@@ -4,7 +4,9 @@ import * as EffectApi from "./effect.ts";
 
 describe("@supabase/pg-delta/effect", () => {
   test("createPlan returns null for identical catalogs", async () => {
-    const catalog = await EffectApi.createEmptyCatalog(17, "postgres");
+    const catalog = await Effect.runPromise(
+      EffectApi.createEmptyCatalog(17, "postgres"),
+    );
 
     const result = await EffectApi.createPlan(catalog, catalog).pipe(
       Effect.runPromise,

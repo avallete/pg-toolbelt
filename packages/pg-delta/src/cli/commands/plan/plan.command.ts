@@ -2,7 +2,6 @@
  * Plan command - compute schema diff and preview changes.
  */
 
-import { Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { handlePlan } from "./plan.handler.ts";
 
@@ -76,31 +75,19 @@ const sqlFormatOptions = Flag.string("sql-format-options").pipe(
   Flag.optional,
 );
 
-export const planCommand = Command.make(
-  "plan",
-  {
-    source,
-    target,
-    format,
-    output,
-    role,
-    filter,
-    serialize,
-    integration,
-    sqlFormat,
-    sqlFormatOptions,
-  },
-  (args) =>
-    handlePlan({
-      source: Option.getOrUndefined(args.source),
-      target: args.target,
-      format: Option.getOrUndefined(args.format),
-      output: Option.getOrUndefined(args.output),
-      role: Option.getOrUndefined(args.role),
-      filter: Option.getOrUndefined(args.filter),
-      serialize: Option.getOrUndefined(args.serialize),
-      integration: Option.getOrUndefined(args.integration),
-      sqlFormat: args.sqlFormat,
-      sqlFormatOptions: Option.getOrUndefined(args.sqlFormatOptions),
-    }),
+export const planFlags = {
+  source,
+  target,
+  format,
+  output,
+  role,
+  filter,
+  serialize,
+  integration,
+  sqlFormat,
+  sqlFormatOptions,
+} as const;
+
+export const planCommand = Command.make("plan", planFlags).pipe(
+  Command.withHandler(handlePlan),
 );

@@ -1,20 +1,16 @@
 import { Effect, FileSystem } from "effect";
-import { deserializePlan, type Plan } from "../../core/plan/index.ts";
-import { applyPlan } from "../../effect.ts";
-import { CliExitError } from "../errors.ts";
-import { Output } from "../output/output.service.ts";
-import { validatePlanRisk } from "../utils.ts";
+import { deserializePlan, type Plan } from "../../../core/plan/index.ts";
+import { applyPlan } from "../../../effect.ts";
+import { CliExitError } from "../../errors.ts";
+import { Output } from "../../output/output.service.ts";
+import { validatePlanRisk } from "../../utils.ts";
 
-export interface ApplyHandlerArgs {
+export const handleApply = Effect.fnUntraced(function* (args: {
   readonly plan: string;
   readonly source: string;
   readonly target: string;
   readonly unsafe: boolean;
-}
-
-export const handleApply = Effect.fnUntraced(function* (
-  args: ApplyHandlerArgs,
-) {
+}) {
   const fs = yield* FileSystem.FileSystem;
   const output = yield* Output;
 

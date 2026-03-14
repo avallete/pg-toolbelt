@@ -41,11 +41,11 @@ const createPoolMock = mock(() => {
   };
 });
 
-mock.module("../plan/ssl-config.ts", () => ({
+mock.module("../../platform/sql/ssl-config.ts", () => ({
   parseSslConfig: parseSslConfigMock,
 }));
 
-mock.module("../postgres-config.ts", () => ({
+mock.module("../../platform/sql/pool.ts", () => ({
   createPool: createPoolMock,
   endPool: endPoolMock,
 }));

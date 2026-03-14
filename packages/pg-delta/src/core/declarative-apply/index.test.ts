@@ -2,7 +2,12 @@ import { describe, expect, mock, test } from "bun:test";
 import { Effect } from "effect";
 import type { Pool } from "pg";
 import { CatalogExtractionError } from "../errors.ts";
-import { applyDeclarativeSchemaPromise as applyDeclarativeSchema } from "./index.ts";
+import type { DatabaseApi } from "../services/database.ts";
+import { applyDeclarativeSchema as _applyDeclarativeSchema } from "./index.ts";
+
+const applyDeclarativeSchema = (
+  ...args: Parameters<typeof _applyDeclarativeSchema>
+) => _applyDeclarativeSchema(...args).pipe(Effect.runPromise);
 
 // Mock extractCatalogProviders to fail, simulating an early failure
 // before roundApply is ever reached.
@@ -15,19 +20,39 @@ mock.module("./extract-catalog-providers.ts", () => ({
     ),
 }));
 
-// Track the pool created internally via createManagedPool so we can verify cleanup.
-let lastCreatedPool: Pool & { closeCalled: boolean };
+// Track cleanup of internally-created scoped databases.
+let lastScopedDbClosed = false;
 
-mock.module("../postgres-config.ts", () => ({
-  createManagedPool: async () => {
-    lastCreatedPool = createMockPool();
-    return {
-      pool: lastCreatedPool,
-      close: async () => {
-        lastCreatedPool.closeCalled = true;
+mock.module("../services/database-live.ts", () => ({
+  wrapPool: (_pool: Pool): DatabaseApi =>
+    ({
+      withConnection: (
+        _fn: (
+          conn: DatabaseApi["withConnection"] extends (fn: infer F) => unknown
+            ? F
+            : never,
+        ) => unknown,
+      ) => {
+        throw new Error("should not call withConnection on mock");
       },
-    };
-  },
+      query: () => Effect.die(new Error("should not query mock")),
+    }) as unknown as DatabaseApi,
+  makeScopedPool: (_url: string) =>
+    Effect.acquireRelease(
+      Effect.sync((): DatabaseApi => {
+        lastScopedDbClosed = false;
+        return {
+          withConnection: () => {
+            throw new Error("should not call withConnection on mock");
+          },
+          query: () => Effect.die(new Error("should not query mock")),
+        } as unknown as DatabaseApi;
+      }),
+      () =>
+        Effect.sync(() => {
+          lastScopedDbClosed = true;
+        }),
+    ),
 }));
 
 function createMockPool(): Pool & { closeCalled: boolean } {
@@ -59,6 +84,8 @@ describe("applyDeclarativeSchema", () => {
   });
 
   test("internally-created pool IS closed on early failure", async () => {
+    lastScopedDbClosed = false;
+
     await expect(
       applyDeclarativeSchema({
         content: [{ filePath: "test.sql", sql: "CREATE TABLE t(id int);" }],
@@ -66,7 +93,6 @@ describe("applyDeclarativeSchema", () => {
       }),
     ).rejects.toThrow("simulated catalog extraction failure");
 
-    expect(lastCreatedPool).toBeDefined();
-    expect(lastCreatedPool.closeCalled).toBe(true);
+    expect(lastScopedDbClosed).toBe(true);
   });
 });

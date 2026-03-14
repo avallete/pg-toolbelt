@@ -1,57 +1,32 @@
-import { Effect } from "effect";
-import type { FilterDSL } from "../../core/integrations/filter/dsl.ts";
-import type { ChangeFilter } from "../../core/integrations/filter/filter.types.ts";
-import type { SerializeDSL } from "../../core/integrations/serialize/dsl.ts";
-import type { ChangeSerializer } from "../../core/integrations/serialize/serialize.types.ts";
-import { applyPlan, createPlan } from "../../effect.ts";
-import { CliExitError, UserCancelled } from "../errors.ts";
-import { Output } from "../output/output.service.ts";
-import { loadIntegrationDSL } from "../utils/integrations.ts";
-import {
-  formatPlanForDisplay,
-  parseJsonEffect,
-  tryCliPromise,
-  validatePlanRisk,
-} from "../utils.ts";
+import { Effect, Option } from "effect";
+import { applyPlan, createPlan } from "../../../effect.ts";
+import { CliExitError, UserCancelled } from "../../errors.ts";
+import { Output } from "../../output/output.service.ts";
+import { resolveIntegration } from "../../utils/resolve-integration.ts";
+import { formatPlanForDisplay, validatePlanRisk } from "../../utils.ts";
 
-export interface SyncHandlerArgs {
+export const handleSync = Effect.fnUntraced(function* (flags: {
   readonly source: string;
   readonly target: string;
   readonly yes: boolean;
   readonly unsafe: boolean;
-  readonly role?: string;
-  readonly filter?: string;
-  readonly serialize?: string;
-  readonly integration?: string;
-}
-
-export const handleSync = Effect.fnUntraced(function* (args: SyncHandlerArgs) {
+  readonly role: Option.Option<string>;
+  readonly filter: Option.Option<string>;
+  readonly serialize: Option.Option<string>;
+  readonly integration: Option.Option<string>;
+}) {
   const output = yield* Output;
 
-  const filterParsed: FilterDSL | undefined = args.filter
-    ? yield* parseJsonEffect<FilterDSL>("filter", args.filter)
-    : undefined;
-  const serializeParsed: SerializeDSL | undefined = args.serialize
-    ? yield* parseJsonEffect<SerializeDSL>("serialize", args.serialize)
-    : undefined;
+  const { filter, serialize } = yield* resolveIntegration({
+    filter: flags.filter,
+    serialize: flags.serialize,
+    integration: flags.integration,
+  });
 
-  let filterOption: FilterDSL | ChangeFilter | undefined = filterParsed;
-  let serializeOption: SerializeDSL | ChangeSerializer | undefined =
-    serializeParsed;
-  if (args.integration) {
-    const integrationName = args.integration;
-    const integrationDSL = yield* tryCliPromise(
-      "Error loading integration",
-      () => loadIntegrationDSL(integrationName),
-    );
-    filterOption = filterOption ?? integrationDSL.filter;
-    serializeOption = serializeOption ?? integrationDSL.serialize;
-  }
-
-  const planResult = yield* createPlan(args.source, args.target, {
-    role: args.role,
-    filter: filterOption,
-    serialize: serializeOption,
+  const planResult = yield* createPlan(flags.source, flags.target, {
+    role: Option.getOrUndefined(flags.role),
+    filter,
+    serialize,
   }).pipe(
     Effect.mapError(
       (error) =>
@@ -70,7 +45,7 @@ export const handleSync = Effect.fnUntraced(function* (args: SyncHandlerArgs) {
   const { content } = formatPlanForDisplay(planResult, "tree");
   yield* output.write(content);
 
-  const validation = validatePlanRisk(planResult.plan, args.unsafe, {
+  const validation = validatePlanRisk(planResult.plan, flags.unsafe, {
     suppressWarning: true,
   });
   if (!validation.valid) {
@@ -90,7 +65,7 @@ export const handleSync = Effect.fnUntraced(function* (args: SyncHandlerArgs) {
     );
   }
 
-  if (!args.yes) {
+  if (!flags.yes) {
     const confirmed = yield* output.confirm("Apply these changes?").pipe(
       Effect.mapError(
         (error) =>
@@ -107,7 +82,7 @@ export const handleSync = Effect.fnUntraced(function* (args: SyncHandlerArgs) {
     }
   }
 
-  const result = yield* applyPlan(planResult.plan, args.source, args.target, {
+  const result = yield* applyPlan(planResult.plan, flags.source, flags.target, {
     verifyPostApply: true,
   }).pipe(Effect.result);
 

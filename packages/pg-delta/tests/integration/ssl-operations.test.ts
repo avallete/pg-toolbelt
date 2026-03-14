@@ -4,13 +4,13 @@
 
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
 import { createPool } from "../../src/core/postgres-config.ts";
 import {
   POSTGRES_VERSION_TO_ALPINE_POSTGRES_TAG,
   POSTGRES_VERSIONS,
 } from "../constants.ts";
 import { PostgresSslContainer } from "../postgres-ssl.ts";
+import { createPlan } from "../promise-helpers.ts";
 import {
   generateSslCertificates,
   type SslCertificateOptions,

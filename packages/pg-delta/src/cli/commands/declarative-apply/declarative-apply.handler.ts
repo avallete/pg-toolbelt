@@ -1,9 +1,9 @@
-import { Effect, FileSystem } from "effect";
-import { loadDeclarativeSchema } from "../../core/declarative-apply/discover-sql.ts";
-import type { RoundResult } from "../../core/declarative-apply/index.ts";
-import { applyDeclarativeSchema } from "../../effect.ts";
-import { CliExitError } from "../errors.ts";
-import { Output } from "../output/output.service.ts";
+import { Effect, FileSystem, Option } from "effect";
+import { loadDeclarativeSchema } from "../../../core/declarative-apply/discover-sql.ts";
+import type { RoundResult } from "../../../core/declarative-apply/index.ts";
+import { applyDeclarativeSchema } from "../../../effect.ts";
+import { CliExitError } from "../../errors.ts";
+import { Output } from "../../output/output.service.ts";
 import {
   buildDiagnosticDisplayItems,
   colorStatementError,
@@ -14,34 +14,30 @@ import {
   positionToLineColumn,
   requiredObjectKeyFromDiagnostic,
   resolveSqlFilePath,
-} from "../utils/apply-display.ts";
+} from "../../utils/apply-display.ts";
 
-export interface DeclarativeApplyHandlerArgs {
+export const handleDeclarativeApply = Effect.fnUntraced(function* (flags: {
   readonly path: string;
   readonly target: string;
-  readonly maxRounds?: number;
+  readonly maxRounds: Option.Option<number>;
   readonly skipFunctionValidation: boolean;
   readonly verbose: boolean;
   readonly ungroupDiagnostics: boolean;
-}
-
-export const handleDeclarativeApply = Effect.fnUntraced(function* (
-  args: DeclarativeApplyHandlerArgs,
-) {
+}) {
   const fs = yield* FileSystem.FileSystem;
   const output = yield* Output;
   const useColors = output.format === "text";
 
   const roundResults: RoundResult[] = [];
-  const onRoundComplete = args.verbose
+  const onRoundComplete = flags.verbose
     ? (round: RoundResult) => {
         roundResults.push(round);
       }
     : undefined;
 
-  yield* output.info(`Analyzing SQL files in ${args.path}...`);
+  yield* output.info(`Analyzing SQL files in ${flags.path}...`);
 
-  const content = yield* loadDeclarativeSchema(args.path).pipe(
+  const content = yield* loadDeclarativeSchema(flags.path).pipe(
     Effect.mapError(
       (error) =>
         new CliExitError({
@@ -55,16 +51,16 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
     return yield* Effect.fail(
       new CliExitError({
         exitCode: 1,
-        message: `No .sql files found in '${args.path}'. Pass a directory containing .sql files or a single .sql file.`,
+        message: `No .sql files found in '${flags.path}'. Pass a directory containing .sql files or a single .sql file.`,
       }),
     );
   }
 
   const result = yield* applyDeclarativeSchema({
     content,
-    targetUrl: args.target,
-    maxRounds: args.maxRounds,
-    validateFunctionBodies: !args.skipFunctionValidation,
+    targetUrl: flags.target,
+    maxRounds: Option.getOrUndefined(flags.maxRounds),
+    validateFunctionBodies: !flags.skipFunctionValidation,
     onRoundComplete,
   }).pipe(
     Effect.mapError(
@@ -95,7 +91,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
     .filter(
       (diagnostic) =>
         diagnostic.code !== "UNKNOWN_STATEMENT_CLASS" &&
-        (args.verbose || !verboseOnlyCodes.has(diagnostic.code)),
+        (flags.verbose || !verboseOnlyCodes.has(diagnostic.code)),
     )
     .sort(
       (left, right) =>
@@ -103,7 +99,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
         (diagnosticDisplayOrder[right.code] ?? 99),
     );
 
-  if (warnings.length > 0 && args.verbose) {
+  if (warnings.length > 0 && flags.verbose) {
     const fileContentCache = new Map<string, string>();
     for (const diagnostic of warnings) {
       const statementId = diagnostic.statementId;
@@ -114,7 +110,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
         !fileContentCache.has(statementId.filePath)
       ) {
         yield* Effect.tryPromise(() =>
-          resolveSqlFilePath(args.path, statementId.filePath),
+          resolveSqlFilePath(flags.path, statementId.filePath),
         ).pipe(
           Effect.flatMap((fullPath) =>
             fs
@@ -159,13 +155,13 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
     });
     const displayItems = buildDiagnosticDisplayItems(
       entries,
-      !args.ungroupDiagnostics,
+      !flags.ungroupDiagnostics,
     );
 
     yield* output.warn(
       formatDiagnosticsBlock(displayItems, warnings.length, {
         useColors,
-        ungroupDiagnostics: args.ungroupDiagnostics,
+        ungroupDiagnostics: flags.ungroupDiagnostics,
       }),
     );
   }
@@ -189,7 +185,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
         ];
         for (const error of apply.validationErrors) {
           const formatted = yield* Effect.tryPromise({
-            try: () => formatStatementError(error, args.path),
+            try: () => formatStatementError(error, flags.path),
             catch: () =>
               new CliExitError({
                 exitCode: 1,
@@ -216,7 +212,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
       if (apply.stuckStatements) {
         for (const stuck of apply.stuckStatements) {
           const formatted = yield* Effect.tryPromise({
-            try: () => formatStatementError(stuck, args.path),
+            try: () => formatStatementError(stuck, flags.path),
             catch: () =>
               new CliExitError({
                 exitCode: 1,
@@ -233,7 +229,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
         );
         for (const error of apply.errors) {
           const formatted = yield* Effect.tryPromise({
-            try: () => formatStatementError(error, args.path),
+            try: () => formatStatementError(error, flags.path),
             catch: () =>
               new CliExitError({
                 exitCode: 1,
@@ -259,7 +255,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
       if (apply.errors) {
         for (const error of apply.errors) {
           const formatted = yield* Effect.tryPromise({
-            try: () => formatStatementError(error, args.path),
+            try: () => formatStatementError(error, flags.path),
             catch: () =>
               new CliExitError({
                 exitCode: 1,
@@ -276,7 +272,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
         );
         for (const error of apply.validationErrors) {
           const formatted = yield* Effect.tryPromise({
-            try: () => formatStatementError(error, args.path),
+            try: () => formatStatementError(error, flags.path),
             catch: () =>
               new CliExitError({
                 exitCode: 1,

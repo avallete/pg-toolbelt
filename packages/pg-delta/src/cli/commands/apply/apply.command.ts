@@ -22,8 +22,8 @@ const unsafe = Flag.boolean("unsafe").pipe(
   Flag.withDefault(false),
 );
 
-export const applyCommand = Command.make(
-  "apply",
-  { plan, source, target, unsafe },
-  handleApply,
+export const applyFlags = { plan, source, target, unsafe } as const;
+
+export const applyCommand = Command.make("apply", applyFlags).pipe(
+  Command.withHandler(handleApply),
 );

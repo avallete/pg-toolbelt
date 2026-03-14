@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
+import { createEmptyCatalog } from "./core/catalog.model.ts";
 import * as NodeApi from "./node.ts";
 
 describe("@supabase/pg-delta/node", () => {
   test("createPlan promise facade returns null for identical catalogs", async () => {
-    const catalog = await NodeApi.createEmptyCatalog(17, "postgres");
+    const catalog = await Effect.runPromise(createEmptyCatalog(17, "postgres"));
     const result = await NodeApi.createPlan(catalog, catalog);
 
     expect(result).toBeNull();

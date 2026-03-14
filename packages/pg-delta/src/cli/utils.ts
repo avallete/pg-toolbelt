@@ -3,7 +3,7 @@
  */
 
 import chalk from "chalk";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { deserializeCatalog } from "../core/catalog.snapshot.ts";
 import type { Change } from "../core/change.types.ts";
 import type { DiffContext } from "../core/context.ts";
@@ -32,6 +32,18 @@ export const parseJsonEffect = <T>(
         message: `Invalid ${label} JSON: ${error instanceof Error ? error.message : String(error)}`,
       }),
   });
+
+/**
+ * Parse an optional JSON string from a CLI flag.
+ * Returns the parsed value if the Option is Some, or undefined if None.
+ */
+export const parseOptionalJson = <T>(
+  label: string,
+  value: Option.Option<string>,
+): Effect.Effect<T | undefined, CliExitError> =>
+  Option.isSome(value)
+    ? parseJsonEffect<T>(label, value.value)
+    : Effect.succeed(undefined as T | undefined);
 
 /**
  * Wrap a Promise-returning CLI operation and normalize thrown errors into a

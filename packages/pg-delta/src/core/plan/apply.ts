@@ -24,13 +24,6 @@ import { makeScopedPool, wrapPool } from "../services/database-live.ts";
 import { sortChanges } from "../sort/sort-changes.ts";
 import type { Plan } from "./types.ts";
 
-type ApplyPlanResult =
-  | { status: "invalid_plan"; message: string }
-  | { status: "fingerprint_mismatch"; current: string; expected: string }
-  | { status: "already_applied" }
-  | { status: "applied"; statements: number; warnings?: string[] }
-  | { status: "failed"; error: unknown; script: string };
-
 interface ApplyPlanOptions {
   verifyPostApply?: boolean;
 }
@@ -43,60 +36,6 @@ type ConnectionInput = string | Pool | DatabaseApi;
  */
 function isSessionStatement(statement: string): boolean {
   return statement.trim().startsWith("SET ");
-}
-
-/**
- * Apply a plan's SQL statements to a target database with integrity checks.
- * Validates fingerprints before and after application to ensure plan integrity.
- */
-
-export async function applyPlanPromise(
-  plan: Plan,
-  source: ConnectionInput,
-  target: ConnectionInput,
-  options: ApplyPlanOptions = {},
-): Promise<ApplyPlanResult> {
-  const result = await applyPlan(plan, source, target, options).pipe(
-    Effect.result,
-    Effect.runPromise,
-  );
-
-  if (result._tag === "Success") {
-    return {
-      status: "applied",
-      statements: result.success.statements,
-      warnings: result.success.warnings,
-    };
-  }
-
-  const error = result.failure;
-  switch (error._tag) {
-    case "InvalidPlanError":
-      return {
-        status: "invalid_plan",
-        message: error.message,
-      };
-    case "FingerprintMismatchError":
-      return {
-        status: "fingerprint_mismatch",
-        current: error.current,
-        expected: error.expected,
-      };
-    case "AlreadyAppliedError":
-      return { status: "already_applied" };
-    case "PlanApplyError":
-      return {
-        status: "failed",
-        error: error.cause,
-        script: error.script,
-      };
-    default:
-      return {
-        status: "failed",
-        error,
-        script: plan.statements.join(";\n"),
-      };
-  }
 }
 
 type ApplyPlanSuccess = {

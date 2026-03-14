@@ -3,4 +3,21 @@
  * implementation stays thin on purpose so the shared Effect programs remain the
  * single source of behavior.
  */
-export * from "./node.ts";
+
+export type {
+  ApplyPlanResult,
+  Catalog,
+  CatalogInput,
+  CreatePlanOptions,
+  DatabaseApi,
+  DeclarativeApplyResult,
+  Plan,
+  SqlFileEntry,
+} from "./node.ts";
+export {
+  applyDeclarativeSchema,
+  applyPlan,
+  createPlan,
+  extractCatalog,
+  loadDeclarativeSchema,
+} from "./node.ts";

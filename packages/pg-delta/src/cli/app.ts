@@ -1,10 +1,10 @@
 import { Command } from "effect/unstable/cli";
-import { applyCommand } from "./commands/apply.ts";
-import { catalogExportCommand } from "./commands/catalog-export.ts";
-import { declarativeApplyCommand } from "./commands/declarative-apply.ts";
-import { declarativeExportCommand } from "./commands/declarative-export.ts";
-import { planCommand } from "./commands/plan.ts";
-import { syncCommand } from "./commands/sync.ts";
+import { applyCommand } from "./commands/apply/apply.command.ts";
+import { catalogExportCommand } from "./commands/catalog-export/catalog-export.command.ts";
+import { declarativeApplyCommand } from "./commands/declarative-apply/declarative-apply.command.ts";
+import { declarativeExportCommand } from "./commands/declarative-export/declarative-export.command.ts";
+import { planCommand } from "./commands/plan/plan.command.ts";
+import { syncCommand } from "./commands/sync/sync.command.ts";
 
 const declarativeCommand = Command.make("declarative").pipe(
   Command.withSubcommands([declarativeApplyCommand, declarativeExportCommand]),

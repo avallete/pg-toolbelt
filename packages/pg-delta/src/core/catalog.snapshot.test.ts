@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { Catalog, createEmptyCatalog } from "./catalog.model.ts";
+import { Effect } from "effect";
+import {
+  createEmptyCatalog as _createEmptyCatalog,
+  Catalog,
+} from "./catalog.model.ts";
+
+const createEmptyCatalog = (version: number, currentUser: string) =>
+  Effect.runPromise(_createEmptyCatalog(version, currentUser));
+
 import {
   deserializeCatalog,
   serializeCatalog,
@@ -280,7 +288,10 @@ describe("catalog snapshot serde", () => {
   });
 
   test("createPlan accepts Catalog directly as source", async () => {
-    const { createPlanPromise: createPlan } = await import("./plan/create.ts");
+    const { createPlan: _createPlan } = await import("./plan/create.ts");
+    const { Effect } = await import("effect");
+    const createPlan = (...args: Parameters<typeof _createPlan>) =>
+      _createPlan(...args).pipe(Effect.runPromise);
 
     const source = await createEmptyCatalog(160000, "postgres");
     const target = await createEmptyCatalog(160000, "postgres");
@@ -290,7 +301,10 @@ describe("catalog snapshot serde", () => {
   });
 
   test("createPlan with null source produces plan when target has objects", async () => {
-    const { createPlanPromise: createPlan } = await import("./plan/create.ts");
+    const { createPlan: _createPlan } = await import("./plan/create.ts");
+    const { Effect } = await import("effect");
+    const createPlan = (...args: Parameters<typeof _createPlan>) =>
+      _createPlan(...args).pipe(Effect.runPromise);
 
     const publicSchema = new Schema({
       name: "public",
@@ -320,7 +334,10 @@ describe("catalog snapshot serde", () => {
   });
 
   test("createPlan with filter DSL without cascade keeps dependents of excluded changes", async () => {
-    const { createPlanPromise: createPlan } = await import("./plan/create.ts");
+    const { createPlan: _createPlan } = await import("./plan/create.ts");
+    const { Effect } = await import("effect");
+    const createPlan = (...args: Parameters<typeof _createPlan>) =>
+      _createPlan(...args).pipe(Effect.runPromise);
 
     const authSchema = new Schema({
       name: "auth",

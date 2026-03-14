@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { createEmptyCatalog } from "./catalog.model.ts";
+import { Effect } from "effect";
+import { createEmptyCatalog as _createEmptyCatalog } from "./catalog.model.ts";
+
+const createEmptyCatalog = (version: number, currentUser: string) =>
+  Effect.runPromise(_createEmptyCatalog(version, currentUser));
+
 import type { Change } from "./change.types.ts";
 import { expandReplaceDependencies } from "./expand-replace-dependencies.ts";
 

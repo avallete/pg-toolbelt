@@ -11,7 +11,6 @@ import { diffCatalogs } from "../../src/core/catalog.diff.ts";
 import { type Catalog, extractCatalog } from "../../src/core/catalog.model.ts";
 import type { Change } from "../../src/core/change.types.ts";
 import { extractVersion } from "../../src/core/context.ts";
-import { applyDeclarativeSchemaPromise as applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
 import type { PgDepend } from "../../src/core/depend.ts";
 import {
   type ExportOptions,
@@ -23,8 +22,6 @@ import {
   hashStableIds,
 } from "../../src/core/fingerprint.ts";
 import type { Integration } from "../../src/core/integrations/integration.types.ts";
-import { applyPlanPromise as applyPlan } from "../../src/core/plan/apply.ts";
-import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
 import { wrapPool } from "../../src/core/services/database-live.ts";
 import { sortChanges } from "../../src/core/sort/sort-changes.ts";
 import {
@@ -32,6 +29,11 @@ import {
   type PostgresVersion,
 } from "../constants.ts";
 import { containerManager } from "../container-manager.js";
+import {
+  applyDeclarativeSchema,
+  applyPlan,
+  createPlan,
+} from "../promise-helpers.ts";
 
 const debugTest = debug("pg-delta:test");
 const debugDependencies = debug("pg-delta:dependencies");

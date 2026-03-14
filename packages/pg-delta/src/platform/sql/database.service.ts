@@ -1,10 +1,8 @@
 import type * as PgClient from "@effect/sql-pg/PgClient";
 import { Effect, ServiceMap } from "effect";
 import type { Connection as SqlConnection } from "effect/unstable/sql/SqlConnection";
-import type {
-  CatalogExtractionError,
-  ConnectionError,
-} from "../../core/errors.ts";
+import type { CatalogExtractionError } from "../../core/errors.ts";
+import type { ConnectionError } from "./errors.ts";
 
 export type QueryInput = string | { text: string; values?: readonly unknown[] };
 

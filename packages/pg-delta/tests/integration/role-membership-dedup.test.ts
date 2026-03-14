@@ -15,9 +15,9 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
-import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
 import { wrapPool } from "../../src/core/services/database-live.ts";
 import { POSTGRES_VERSIONS } from "../constants.ts";
+import { createPlan } from "../promise-helpers.ts";
 import { withDbIsolated } from "../utils.ts";
 
 /** Join plan statements into a runnable SQL script. */

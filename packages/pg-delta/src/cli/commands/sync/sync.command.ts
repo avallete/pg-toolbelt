@@ -1,4 +1,3 @@
-import { Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { handleSync } from "./sync.handler.ts";
 
@@ -54,18 +53,17 @@ const integration = Flag.string("integration").pipe(
   Flag.optional,
 );
 
-export const syncCommand = Command.make(
-  "sync",
-  { source, target, yes, unsafe, role, filter, serialize, integration },
-  (args) =>
-    handleSync({
-      source: args.source,
-      target: args.target,
-      yes: args.yes,
-      unsafe: args.unsafe,
-      role: Option.getOrUndefined(args.role),
-      filter: Option.getOrUndefined(args.filter),
-      serialize: Option.getOrUndefined(args.serialize),
-      integration: Option.getOrUndefined(args.integration),
-    }),
+export const syncFlags = {
+  source,
+  target,
+  yes,
+  unsafe,
+  role,
+  filter,
+  serialize,
+  integration,
+} as const;
+
+export const syncCommand = Command.make("sync", syncFlags).pipe(
+  Command.withHandler(handleSync),
 );

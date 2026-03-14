@@ -3,7 +3,6 @@
  * using pg-topo static analysis + round-based execution.
  */
 
-import { Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { handleDeclarativeApply } from "./declarative-apply.handler.ts";
 
@@ -44,23 +43,16 @@ const ungroupDiagnostics = Flag.boolean("ungroup-diagnostics").pipe(
   Flag.withDefault(false),
 );
 
+export const declarativeApplyFlags = {
+  path: pathOpt,
+  target,
+  maxRounds,
+  skipFunctionValidation,
+  verbose,
+  ungroupDiagnostics,
+} as const;
+
 export const declarativeApplyCommand = Command.make(
   "apply",
-  {
-    path: pathOpt,
-    target,
-    maxRounds,
-    skipFunctionValidation,
-    verbose,
-    ungroupDiagnostics,
-  },
-  (args) =>
-    handleDeclarativeApply({
-      path: args.path,
-      target: args.target,
-      maxRounds: Option.getOrUndefined(args.maxRounds),
-      skipFunctionValidation: args.skipFunctionValidation,
-      verbose: args.verbose,
-      ungroupDiagnostics: args.ungroupDiagnostics,
-    }),
-);
+  declarativeApplyFlags,
+).pipe(Command.withHandler(handleDeclarativeApply));

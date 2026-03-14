@@ -1,4 +1,4 @@
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { handleCatalogExport } from "./catalog-export.handler.ts";
 
@@ -19,13 +19,13 @@ const role = Flag.string("role").pipe(
   Flag.optional,
 );
 
+export const catalogExportFlags = { target, output, role } as const;
+
 export const catalogExportCommand = Command.make(
   "catalog-export",
-  { target, output, role },
-  (args) =>
-    handleCatalogExport({
-      target: args.target,
-      output: args.output,
-      role: Option.getOrUndefined(args.role),
-    }).pipe(Effect.scoped),
+  catalogExportFlags,
+).pipe(
+  Command.withHandler((flags) =>
+    handleCatalogExport(flags).pipe(Effect.scoped),
+  ),
 );

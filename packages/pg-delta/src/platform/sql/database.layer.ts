@@ -3,19 +3,19 @@ import { Effect, Option, Schedule, type Scope } from "effect";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
 import type { Pool } from "pg";
 import { escapeIdentifier } from "pg";
+import { CatalogExtractionError } from "../../core/errors.ts";
+import { type DatabaseApi, fromPgClient } from "./database.service.ts";
 import {
-  CatalogExtractionError,
   ConnectionError,
   ConnectionTimeoutError,
   SslConfigError,
-} from "../../core/errors.ts";
-import { parseSslConfig } from "../../core/plan/ssl-config.ts";
-import { createPool, endPool } from "../../core/postgres-config.ts";
+} from "./errors.ts";
+import { createPool, endPool } from "./pool.ts";
 import {
   makePgRuntimeConfigLayer,
   PgRuntimeConfigService,
-} from "../../core/runtime-config.ts";
-import { type DatabaseApi, fromPgClient } from "./database.service.ts";
+} from "./runtime-config.ts";
+import { parseSslConfig } from "./ssl-config.ts";
 
 const CONNECT_RETRY_BASE_DELAY = "50 millis";
 const CONNECT_RETRY_TIMES = 2;

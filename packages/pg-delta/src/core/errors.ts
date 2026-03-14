@@ -1,28 +1,13 @@
 import { Data } from "effect";
 
 // ---------------------------------------------------------------------------
-// Connection errors
+// Connection errors (re-exported from platform)
 // ---------------------------------------------------------------------------
 
-/**
- * General connection failure — wraps errors from pg pool.connect().
- */
-export class ConnectionError extends Data.TaggedError("ConnectionError")<{
-  readonly message: string;
-  readonly label: "source" | "target";
-  readonly cause?: unknown;
-}> {}
-
-/**
- * Connection attempt timed out.
- */
-export class ConnectionTimeoutError extends Data.TaggedError(
-  "ConnectionTimeoutError",
-)<{
-  readonly message: string;
-  readonly label: "source" | "target";
-  readonly timeoutMs: number;
-}> {}
+export {
+  ConnectionError,
+  ConnectionTimeoutError,
+} from "../platform/sql/errors.ts";
 
 // ---------------------------------------------------------------------------
 // Catalog errors
@@ -98,16 +83,10 @@ export class StuckError extends Data.TaggedError("StuckError")<{
 }> {}
 
 // ---------------------------------------------------------------------------
-// SSL/config errors
+// SSL/config errors (re-exported from platform)
 // ---------------------------------------------------------------------------
 
-/**
- * SSL configuration parsing failed.
- */
-export class SslConfigError extends Data.TaggedError("SslConfigError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export { SslConfigError } from "../platform/sql/errors.ts";
 
 // ---------------------------------------------------------------------------
 // File I/O errors

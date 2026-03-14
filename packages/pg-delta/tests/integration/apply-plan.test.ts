@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { applyPlanPromise as applyPlan } from "../../src/core/plan/apply.ts";
-import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
 import { POSTGRES_VERSIONS } from "../constants.ts";
+import { applyPlan, createPlan } from "../promise-helpers.ts";
 import { withDb } from "../utils.ts";
 
 for (const pgVersion of POSTGRES_VERSIONS) {

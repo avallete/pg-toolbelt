@@ -3,12 +3,13 @@
  */
 
 import type { Change } from "../change.types.ts";
+import type { DiffContext } from "../context.ts";
 import { buildPlanScopeFingerprint, hashStableIds } from "../fingerprint.ts";
 import type { Integration } from "../integrations/integration.types.ts";
-import type { createPlanPromise } from "../plan/create.ts";
 import { DEFAULT_OPTIONS } from "../plan/sql-format/constants.ts";
 import type { SqlFormatOptions } from "../plan/sql-format/types.ts";
 import { formatSqlScript } from "../plan/statements.ts";
+import type { Plan } from "../plan/types.ts";
 import { createFileMapper } from "./file-mapper.ts";
 import { groupChangesByFile } from "./grouper.ts";
 import type { DeclarativeSchemaOutput, FileEntry, Grouping } from "./types.ts";
@@ -21,7 +22,7 @@ import type { DeclarativeSchemaOutput, FileEntry, Grouping } from "./types.ts";
  * The result of createPlan, containing the plan, sorted changes, and context.
  * Use this type when you have already confirmed createPlan returned non-null.
  */
-type PlanResult = NonNullable<Awaited<ReturnType<typeof createPlanPromise>>>;
+type PlanResult = { plan: Plan; sortedChanges: Change[]; ctx: DiffContext };
 
 // ============================================================================
 // Public API

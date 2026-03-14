@@ -1,4 +1,3 @@
-import { Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { handleDeclarativeExport } from "./declarative-export.handler.ts";
 
@@ -94,39 +93,24 @@ const verbose = Flag.boolean("verbose").pipe(
   Flag.withDefault(false),
 );
 
+export const declarativeExportFlags = {
+  source,
+  target,
+  output,
+  integration,
+  filter,
+  serialize,
+  groupingMode,
+  groupPatterns,
+  flatSchemas,
+  formatOptions,
+  force,
+  dryRun,
+  diffFocus,
+  verbose,
+} as const;
+
 export const declarativeExportCommand = Command.make(
   "export",
-  {
-    source,
-    target,
-    output,
-    integration,
-    filter,
-    serialize,
-    groupingMode,
-    groupPatterns,
-    flatSchemas,
-    formatOptions,
-    force,
-    dryRun,
-    diffFocus,
-    verbose,
-  },
-  (args) =>
-    handleDeclarativeExport({
-      source: Option.getOrUndefined(args.source),
-      target: args.target,
-      output: args.output,
-      integration: Option.getOrUndefined(args.integration),
-      filter: Option.getOrUndefined(args.filter),
-      serialize: Option.getOrUndefined(args.serialize),
-      groupingMode: Option.getOrUndefined(args.groupingMode),
-      groupPatterns: Option.getOrUndefined(args.groupPatterns),
-      flatSchemas: Option.getOrUndefined(args.flatSchemas),
-      formatOptions: Option.getOrUndefined(args.formatOptions),
-      force: args.force,
-      dryRun: args.dryRun,
-      diffFocus: args.diffFocus,
-      verbose: args.verbose,
-    }),
-);
+  declarativeExportFlags,
+).pipe(Command.withHandler(handleDeclarativeExport));

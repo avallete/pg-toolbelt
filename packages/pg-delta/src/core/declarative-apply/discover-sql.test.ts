@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { loadDeclarativeSchemaPromise as loadDeclarativeSchema } from "./discover-sql.ts";
+import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
+import { Effect } from "effect";
+import { loadDeclarativeSchema } from "./discover-sql.ts";
+
+const run = <A>(
+  effect: Effect.Effect<A, unknown, import("effect").FileSystem.FileSystem>,
+) => Effect.runPromise(effect.pipe(Effect.provide(NodeFileSystem.layer)));
 
 describe("loadDeclarativeSchema", () => {
   test("throws when path does not exist", async () => {
@@ -11,8 +17,8 @@ describe("loadDeclarativeSchema", () => {
       `pgdelta-nonexistent-${Date.now()}`,
     );
 
-    await expect(loadDeclarativeSchema(nonExistent)).rejects.toThrow(
-      /Cannot access.*ENOENT/,
+    await expect(run(loadDeclarativeSchema(nonExistent))).rejects.toThrow(
+      /Cannot access/,
     );
   });
 
@@ -26,7 +32,7 @@ describe("loadDeclarativeSchema", () => {
     await writeFile(txtFile, "not sql");
 
     try {
-      await expect(loadDeclarativeSchema(txtFile)).rejects.toThrow(
+      await expect(run(loadDeclarativeSchema(txtFile))).rejects.toThrow(
         /Path is not a \.sql file/,
       );
     } finally {
@@ -45,7 +51,7 @@ describe("loadDeclarativeSchema", () => {
     await writeFile(sqlFile, content);
 
     try {
-      const entries = await loadDeclarativeSchema(sqlFile);
+      const entries = await run(loadDeclarativeSchema(sqlFile));
       expect(entries).toHaveLength(1);
       expect(entries[0].filePath).toBe("schema.sql");
       expect(entries[0].sql).toBe(content);
@@ -72,7 +78,7 @@ describe("loadDeclarativeSchema", () => {
     );
 
     try {
-      const entries = await loadDeclarativeSchema(dir);
+      const entries = await run(loadDeclarativeSchema(dir));
       expect(entries.length).toBeGreaterThanOrEqual(3);
       const paths = entries.map((e) => e.filePath);
       const sorted = [...paths].sort((a, b) => a.localeCompare(b));
@@ -94,7 +100,7 @@ describe("loadDeclarativeSchema", () => {
     await writeFile(path.join(dir, "readme.txt"), "no sql here");
 
     try {
-      const entries = await loadDeclarativeSchema(dir);
+      const entries = await run(loadDeclarativeSchema(dir));
       expect(entries).toHaveLength(0);
     } finally {
       await rm(dir, { recursive: true, force: true });
