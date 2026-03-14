@@ -1,4 +1,3 @@
-import chalk from "chalk";
 import { Effect, FileSystem } from "effect";
 import { loadDeclarativeSchema } from "../../core/declarative-apply/discover-sql.ts";
 import type { RoundResult } from "../../core/declarative-apply/index.ts";
@@ -7,7 +6,10 @@ import { CliExitError } from "../errors.ts";
 import { Output } from "../output/output.service.ts";
 import {
   buildDiagnosticDisplayItems,
+  colorStatementError,
   type DiagnosticDisplayEntry,
+  formatDiagnosticsBlock,
+  formatRoundStatus,
   formatStatementError,
   positionToLineColumn,
   requiredObjectKeyFromDiagnostic,
@@ -28,6 +30,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const output = yield* Output;
+  const useColors = output.format === "text";
 
   const roundResults: RoundResult[] = [];
   const onRoundComplete = args.verbose
@@ -73,17 +76,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
   );
 
   for (const round of roundResults) {
-    const parts = [
-      `Round ${round.round}:`,
-      chalk.green(`${round.applied} applied`),
-    ];
-    if (round.deferred > 0) {
-      parts.push(chalk.yellow(`${round.deferred} deferred`));
-    }
-    if (round.failed > 0) {
-      parts.push(chalk.red(`${round.failed} failed`));
-    }
-    yield* output.info(parts.join("  "));
+    yield* output.info(formatRoundStatus(round, useColors));
   }
 
   const diagnosticDisplayOrder: Record<string, number> = {
@@ -91,11 +84,6 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
     DUPLICATE_PRODUCER: 1,
     CYCLE_EDGE_SKIPPED: 2,
     UNRESOLVED_DEPENDENCY: 3,
-  };
-  const diagnosticColor: Record<string, (s: string) => string> = {
-    DUPLICATE_PRODUCER: chalk.yellow,
-    CYCLE_EDGE_SKIPPED: chalk.red,
-    UNRESOLVED_DEPENDENCY: chalk.dim,
   };
   const verboseOnlyCodes = new Set([
     "UNRESOLVED_DEPENDENCY",
@@ -173,53 +161,12 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
       !args.ungroupDiagnostics,
     );
 
-    const diagnosticLines: string[] = [
-      `\n${warnings.length} diagnostic(s) from static analysis:\n`,
-    ];
-
-    let lastCode = "";
-    const previewLimit = 5;
-    for (const item of displayItems) {
-      if (item.code !== lastCode) {
-        if (lastCode !== "") {
-          diagnosticLines.push("\n");
-        }
-        lastCode = item.code;
-      }
-
-      const colorFn = diagnosticColor[item.code] ?? chalk.yellow;
-      const location =
-        item.locations.length > 0 ? ` (${item.locations[0]})` : "";
-      const occurrences =
-        !args.ungroupDiagnostics && item.locations.length > 1
-          ? ` x${item.locations.length}`
-          : "";
-      diagnosticLines.push(
-        colorFn(`  [${item.code}]${location}${occurrences} ${item.message}\n`),
-      );
-
-      if (!args.ungroupDiagnostics && item.requiredObjectKey) {
-        diagnosticLines.push(
-          colorFn(`    -> Object: ${item.requiredObjectKey}\n`),
-        );
-      }
-      if (!args.ungroupDiagnostics && item.locations.length > 1) {
-        for (const locationEntry of item.locations.slice(0, previewLimit)) {
-          diagnosticLines.push(colorFn(`    at ${locationEntry}\n`));
-        }
-        const remaining = item.locations.length - previewLimit;
-        if (remaining > 0) {
-          diagnosticLines.push(
-            colorFn(`    ... and ${remaining} more location(s)\n`),
-          );
-        }
-      }
-      if (item.suggestedFix) {
-        diagnosticLines.push(colorFn(`    -> Fix: ${item.suggestedFix}\n`));
-      }
-    }
-
-    yield* output.warn(diagnosticLines.join(""));
+    yield* output.warn(
+      formatDiagnosticsBlock(displayItems, warnings.length, {
+        useColors,
+        ungroupDiagnostics: args.ungroupDiagnostics,
+      }),
+    );
   }
 
   const { apply } = result;
@@ -248,7 +195,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
                 message: `Error formatting statement: ${error.message}`,
               }),
           });
-          errorLines.push(chalk.yellow(formatted));
+          errorLines.push(colorStatementError(formatted, "warning", useColors));
           errorLines.push("");
         }
         yield* output.warn(errorLines.join("\n"));
@@ -275,7 +222,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
                 message: `Error formatting statement: ${stuck.message}`,
               }),
           });
-          errorLines.push(chalk.red(formatted));
+          errorLines.push(colorStatementError(formatted, "error", useColors));
           errorLines.push("");
         }
       }
@@ -292,7 +239,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
                 message: `Error formatting statement: ${error.message}`,
               }),
           });
-          errorLines.push(chalk.red(formatted));
+          errorLines.push(colorStatementError(formatted, "error", useColors));
           errorLines.push("");
         }
       }
@@ -318,7 +265,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
                 message: `Error formatting statement: ${error.message}`,
               }),
           });
-          errorLines.push(chalk.red(formatted));
+          errorLines.push(colorStatementError(formatted, "error", useColors));
           errorLines.push("");
         }
       }
@@ -335,7 +282,7 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
                 message: `Error formatting statement: ${error.message}`,
               }),
           });
-          errorLines.push(chalk.yellow(formatted));
+          errorLines.push(colorStatementError(formatted, "warning", useColors));
           errorLines.push("");
         }
       }

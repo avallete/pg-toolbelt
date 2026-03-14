@@ -1,5 +1,4 @@
 import path from "node:path";
-import chalk from "chalk";
 import { Effect, FileSystem } from "effect";
 import type { Catalog } from "../../core/catalog.model.ts";
 import type { CatalogSnapshot } from "../../core/catalog.snapshot.ts";
@@ -17,7 +16,9 @@ import {
   assertSafePath,
   buildFileTree,
   computeFileDiff,
+  formatDryRunNotice,
   formatExportSummary,
+  formatFileLegend,
 } from "../utils/export-display.ts";
 import { loadIntegrationDSL } from "../utils/integrations.ts";
 import { isPostgresUrl, loadCatalogFromFile } from "../utils/resolve-input.ts";
@@ -49,6 +50,7 @@ export const handleDeclarativeExport = Effect.fnUntraced(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const output = yield* Output;
+  const useColors = output.format === "text";
   const { compileSerializeDSL } = yield* tryCliPromise(
     "Error loading serialize DSL support",
     () => import("../../core/integrations/serialize/dsl.ts"),
@@ -191,14 +193,12 @@ export const handleDeclarativeExport = Effect.fnUntraced(function* (
   const treeOutput = buildFileTree(
     exportOutput.files.map((file) => file.path),
     path.basename(outputDir) || outputDir,
-    { diff, diffFocus: args.diffFocus },
+    { diff, diffFocus: args.diffFocus, useColors },
   );
   yield* output.write(treeOutput);
-  yield* output.write(
-    `${chalk.green("+")} created   ${chalk.yellow("~")} updated   ${chalk.red("-")} deleted`,
-  );
+  yield* output.write(formatFileLegend(useColors));
 
-  const summary = formatExportSummary(diff, args.dryRun);
+  const summary = formatExportSummary(diff, args.dryRun, useColors);
   if (summary) {
     yield* output.info(summary);
   }
@@ -213,8 +213,9 @@ export const handleDeclarativeExport = Effect.fnUntraced(function* (
   );
 
   if (args.dryRun) {
-    yield* output.info(chalk.dim("\n(dry-run: no files written)"));
-    yield* output.info(chalk.cyan(applyTip(outputDir)));
+    const dryRunDisplay = formatDryRunNotice(applyTip(outputDir), useColors);
+    yield* output.info(dryRunDisplay.notice);
+    yield* output.info(dryRunDisplay.tip);
     return;
   }
 

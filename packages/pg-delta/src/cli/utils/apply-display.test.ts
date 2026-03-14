@@ -6,7 +6,11 @@ import type { Diagnostic, DiagnosticCode } from "@supabase/pg-topo";
 import type { StatementError } from "../../core/declarative-apply/round-apply.ts";
 import {
   buildDiagnosticDisplayItems,
+  colorStatementError,
   type DiagnosticDisplayEntry,
+  type DiagnosticDisplayItem,
+  formatDiagnosticsBlock,
+  formatRoundStatus,
   formatStatementError,
   positionToLineColumn,
   requiredObjectKeyFromDiagnostic,
@@ -344,5 +348,169 @@ describe("formatStatementError", () => {
     for (const line of result.split("\n")) {
       expect(line).toMatch(/^ {2}/);
     }
+  });
+});
+
+// ============================================================================
+// formatRoundStatus
+// ============================================================================
+
+describe("formatRoundStatus", () => {
+  test("plain text (no colors) shows all parts", () => {
+    const result = formatRoundStatus(
+      { round: 1, applied: 5, deferred: 2, failed: 1, errors: [] },
+      false,
+    );
+    expect(result).toBe("Round 1:  5 applied  2 deferred  1 failed");
+  });
+
+  test("omits deferred and failed when zero", () => {
+    const result = formatRoundStatus(
+      { round: 3, applied: 10, deferred: 0, failed: 0, errors: [] },
+      false,
+    );
+    expect(result).toBe("Round 3:  10 applied");
+  });
+
+  test("with colors enabled still includes content", () => {
+    const result = formatRoundStatus(
+      { round: 1, applied: 5, deferred: 2, failed: 0, errors: [] },
+      true,
+    );
+    expect(result).toContain("Round 1:");
+    expect(result).toContain("5 applied");
+    expect(result).toContain("2 deferred");
+  });
+});
+
+// ============================================================================
+// formatDiagnosticsBlock
+// ============================================================================
+
+describe("formatDiagnosticsBlock", () => {
+  const makeItem = (
+    overrides: Partial<DiagnosticDisplayItem> = {},
+  ): DiagnosticDisplayItem => ({
+    code: "PARSE_ERROR",
+    message: "something went wrong",
+    locations: [],
+    ...overrides,
+  });
+
+  test("renders header with warning count", () => {
+    const result = formatDiagnosticsBlock([makeItem()], 3, {
+      useColors: false,
+      ungroupDiagnostics: false,
+    });
+    expect(result).toContain("3 diagnostic(s) from static analysis:");
+  });
+
+  test("renders code and message for each item", () => {
+    const result = formatDiagnosticsBlock(
+      [makeItem({ code: "CYCLE_EDGE_SKIPPED", message: "cycle detected" })],
+      1,
+      { useColors: false, ungroupDiagnostics: false },
+    );
+    expect(result).toContain("[CYCLE_EDGE_SKIPPED]");
+    expect(result).toContain("cycle detected");
+  });
+
+  test("shows location and occurrence count when grouped", () => {
+    const result = formatDiagnosticsBlock(
+      [
+        makeItem({
+          locations: ["a.sql:1", "b.sql:2", "c.sql:3"],
+        }),
+      ],
+      1,
+      { useColors: false, ungroupDiagnostics: false },
+    );
+    expect(result).toContain("(a.sql:1)");
+    expect(result).toContain("x3");
+    expect(result).toContain("at a.sql:1");
+    expect(result).toContain("at b.sql:2");
+    expect(result).toContain("at c.sql:3");
+  });
+
+  test("respects previewLimit for locations", () => {
+    const locations = Array.from({ length: 8 }, (_, i) => `file${i}.sql:1`);
+    const result = formatDiagnosticsBlock([makeItem({ locations })], 1, {
+      useColors: false,
+      ungroupDiagnostics: false,
+      previewLimit: 3,
+    });
+    expect(result).toContain("at file0.sql:1");
+    expect(result).toContain("at file2.sql:1");
+    expect(result).not.toContain("at file3.sql:1");
+    expect(result).toContain("... and 5 more location(s)");
+  });
+
+  test("shows requiredObjectKey when grouped", () => {
+    const result = formatDiagnosticsBlock(
+      [makeItem({ requiredObjectKey: "public.users" })],
+      1,
+      { useColors: false, ungroupDiagnostics: false },
+    );
+    expect(result).toContain("-> Object: public.users");
+  });
+
+  test("shows suggestedFix", () => {
+    const result = formatDiagnosticsBlock(
+      [makeItem({ suggestedFix: "Add a CREATE statement" })],
+      1,
+      { useColors: false, ungroupDiagnostics: false },
+    );
+    expect(result).toContain("-> Fix: Add a CREATE statement");
+  });
+
+  test("ungrouped mode skips locations list and object key", () => {
+    const result = formatDiagnosticsBlock(
+      [
+        makeItem({
+          locations: ["a.sql:1", "b.sql:2"],
+          requiredObjectKey: "public.foo",
+        }),
+      ],
+      1,
+      { useColors: false, ungroupDiagnostics: true },
+    );
+    expect(result).not.toContain("at a.sql:1");
+    expect(result).not.toContain("-> Object:");
+  });
+
+  test("without colors produces same content as with colors (in non-TTY)", () => {
+    const withColors = formatDiagnosticsBlock([makeItem()], 1, {
+      useColors: true,
+      ungroupDiagnostics: false,
+    });
+    const withoutColors = formatDiagnosticsBlock([makeItem()], 1, {
+      useColors: false,
+      ungroupDiagnostics: false,
+    });
+    // Both should contain the diagnostic content
+    expect(withColors).toContain("[PARSE_ERROR]");
+    expect(withoutColors).toContain("[PARSE_ERROR]");
+  });
+});
+
+// ============================================================================
+// colorStatementError
+// ============================================================================
+
+describe("colorStatementError", () => {
+  test("returns unmodified string when colors disabled", () => {
+    expect(colorStatementError("error text", "error", false)).toBe(
+      "error text",
+    );
+    expect(colorStatementError("warning text", "warning", false)).toBe(
+      "warning text",
+    );
+  });
+
+  test("preserves content with colors enabled", () => {
+    const errResult = colorStatementError("error text", "error", true);
+    expect(errResult).toContain("error text");
+    const warnResult = colorStatementError("warning text", "warning", true);
+    expect(warnResult).toContain("warning text");
   });
 });

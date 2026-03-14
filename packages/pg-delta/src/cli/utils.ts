@@ -108,66 +108,48 @@ export function formatPlanForDisplay(
     }
     default: {
       const hierarchy = groupChangesHierarchically(ctx, sortedChanges);
-      const previousLevel = chalk.level;
-      if (options.disableColors) {
-        chalk.level = 0;
-      }
-      try {
-        let treeContent = formatTree(hierarchy);
-        if (risk.level === "data_loss") {
-          const warningLines = [
-            "",
-            chalk.yellow("⚠ Data-loss operations detected:"),
-            ...risk.statements.map((statement: string) =>
-              chalk.yellow(`- ${statement}`),
-            ),
-          ];
-          if (options.showUnsafeFlagSuggestion !== false) {
-            warningLines.push(
-              chalk.yellow(
-                "Use `--unsafe` to allow applying these operations.",
-              ),
+      const treeContent = withChalkLevel(
+        options.disableColors ? 0 : undefined,
+        () => {
+          let content = formatTree(hierarchy);
+          if (risk.level === "data_loss") {
+            const warningLines = formatDataLossWarning(risk.statements, {
+              showUnsafeFlagSuggestion: options.showUnsafeFlagSuggestion,
+              useColors: !options.disableColors,
+            });
+            const treeLines = content.split("\n");
+            // Insert warning after the legend (at the end of the output)
+            // Find the legend line which contains "create", "alter", and "drop"
+            let insertIndex = treeLines.length;
+            const ansiPattern = new RegExp(
+              `${String.fromCharCode(27)}\\[[0-9;]*m`,
+              "g",
             );
-          }
-          const treeLines = treeContent.split("\n");
-          // Insert warning after the legend (at the end of the output)
-          // Find the legend line which contains "create", "alter", and "drop"
-          let insertIndex = treeLines.length;
-          const ansiPattern = new RegExp(
-            `${String.fromCharCode(27)}\\[[0-9;]*m`,
-            "g",
-          );
-          // Search from the end backwards for the legend
-          for (let i = treeLines.length - 1; i >= 0; i--) {
-            const line = treeLines[i];
-            const stripped = line.replace(ansiPattern, "").trim();
-            // Legend format: "+ create   ~ alter   - drop" (or variations)
-            if (
-              stripped.includes("create") &&
-              stripped.includes("alter") &&
-              stripped.includes("drop")
-            ) {
-              insertIndex = i + 1;
-              break;
+            // Search from the end backwards for the legend
+            for (let i = treeLines.length - 1; i >= 0; i--) {
+              const line = treeLines[i];
+              const stripped = line.replace(ansiPattern, "").trim();
+              // Legend format: "+ create   ~ alter   - drop" (or variations)
+              if (
+                stripped.includes("create") &&
+                stripped.includes("alter") &&
+                stripped.includes("drop")
+              ) {
+                insertIndex = i + 1;
+                break;
+              }
             }
+            treeLines.splice(insertIndex, 0, ...warningLines);
+            content = treeLines.join("\n");
           }
-          // Fallback: if legend not found, append at the end
-          if (insertIndex === treeLines.length) {
-            insertIndex = treeLines.length;
+          // add newline for nicer stdout when in tree mode
+          if (!content.endsWith("\n")) {
+            content = `${content}\n`;
           }
-          treeLines.splice(insertIndex, 0, ...warningLines);
-          treeContent = treeLines.join("\n");
-        }
-        // add newline for nicer stdout when in tree mode
-        if (!treeContent.endsWith("\n")) {
-          treeContent = `${treeContent}\n`;
-        }
-        return { content: treeContent, label: "Human-readable plan" };
-      } finally {
-        if (options.disableColors) {
-          chalk.level = previousLevel;
-        }
-      }
+          return content;
+        },
+      );
+      return { content: treeContent, label: "Human-readable plan" };
     }
   }
 }
@@ -267,3 +249,41 @@ export const handleApplyResultEffect = (
       }
     }
   });
+
+// ============================================================================
+// Internal helpers
+// ============================================================================
+
+/**
+ * Temporarily override chalk.level for the duration of `fn`.
+ * If `level` is undefined, runs `fn` without any override.
+ */
+function withChalkLevel<T>(level: number | undefined, fn: () => T): T {
+  if (level === undefined) return fn();
+  const prev = chalk.level;
+  chalk.level = level as typeof chalk.level;
+  try {
+    return fn();
+  } finally {
+    chalk.level = prev;
+  }
+}
+
+/**
+ * Format data-loss warning lines with optional coloring.
+ */
+export function formatDataLossWarning(
+  statements: string[],
+  options: { showUnsafeFlagSuggestion?: boolean; useColors?: boolean },
+): string[] {
+  const yellow = options.useColors !== false ? chalk.yellow : (s: string) => s;
+  const lines = [
+    "",
+    yellow("⚠ Data-loss operations detected:"),
+    ...statements.map((statement: string) => yellow(`- ${statement}`)),
+  ];
+  if (options.showUnsafeFlagSuggestion !== false) {
+    lines.push(yellow("Use `--unsafe` to allow applying these operations."));
+  }
+  return lines;
+}

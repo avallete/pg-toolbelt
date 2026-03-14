@@ -3,7 +3,14 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FileEntry } from "../../core/export/types.ts";
-import { assertSafePath, computeFileDiff } from "./export-display.ts";
+import {
+  assertSafePath,
+  buildFileTree,
+  computeFileDiff,
+  formatDryRunNotice,
+  formatExportSummary,
+  formatFileLegend,
+} from "./export-display.ts";
 
 // ============================================================================
 // assertSafePath
@@ -99,5 +106,126 @@ describe("computeFileDiff", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ============================================================================
+// formatFileLegend
+// ============================================================================
+
+describe("formatFileLegend", () => {
+  test("with colors preserves legend content", () => {
+    const result = formatFileLegend(true);
+    expect(result).toContain("created");
+    expect(result).toContain("updated");
+    expect(result).toContain("deleted");
+  });
+
+  test("without colors produces plain text", () => {
+    const result = formatFileLegend(false);
+    expect(result).toBe("+ created   ~ updated   - deleted");
+  });
+});
+
+// ============================================================================
+// formatExportSummary
+// ============================================================================
+
+describe("formatExportSummary", () => {
+  test("with colors preserves content", () => {
+    const diff = {
+      created: ["a.sql"],
+      updated: ["b.sql"],
+      deleted: ["c.sql"],
+      unchanged: [],
+    };
+    const result = formatExportSummary(diff, false, true);
+    expect(result).toContain("Created: 1 file(s)");
+    expect(result).toContain("Updated: 1 file(s)");
+    expect(result).toContain("Deleted: 1 file(s)");
+  });
+
+  test("without colors produces plain text", () => {
+    const diff = {
+      created: ["a.sql"],
+      updated: ["b.sql"],
+      deleted: ["c.sql"],
+      unchanged: ["d.sql"],
+    };
+    const result = formatExportSummary(diff, false, false);
+    expect(result).toContain("Created: 1 file(s)");
+    expect(result).toContain("Updated: 1 file(s)");
+    expect(result).toContain("Deleted: 1 file(s)");
+    expect(result).toContain("Unchanged: 1 file(s)");
+  });
+
+  test("dry-run uses 'Would' phrasing", () => {
+    const diff = {
+      created: ["a.sql"],
+      updated: [],
+      deleted: [],
+      unchanged: [],
+    };
+    const result = formatExportSummary(diff, true, false);
+    expect(result).toContain("Would create: 1 file(s)");
+  });
+
+  test("returns empty string when no changes", () => {
+    const diff = { created: [], updated: [], deleted: [], unchanged: [] };
+    expect(formatExportSummary(diff, false, false)).toBe("");
+  });
+});
+
+// ============================================================================
+// buildFileTree
+// ============================================================================
+
+describe("buildFileTree", () => {
+  test("without colors includes prefix symbols without ANSI", () => {
+    const diff = {
+      created: ["a.sql"],
+      updated: ["b.sql"],
+      deleted: ["c.sql"],
+      unchanged: [],
+    };
+    const result = buildFileTree(["a.sql", "b.sql", "c.sql"], "out", {
+      diff,
+      useColors: false,
+    });
+    expect(result).toContain("+ a.sql");
+    expect(result).toContain("~ b.sql");
+    expect(result).toContain("- c.sql");
+  });
+
+  test("with colors preserves content", () => {
+    const diff = {
+      created: ["a.sql"],
+      updated: [],
+      deleted: [],
+      unchanged: [],
+    };
+    const result = buildFileTree(["a.sql"], "out", {
+      diff,
+      useColors: true,
+    });
+    expect(result).toContain("a.sql");
+  });
+});
+
+// ============================================================================
+// formatDryRunNotice
+// ============================================================================
+
+describe("formatDryRunNotice", () => {
+  test("with colors preserves content", () => {
+    const result = formatDryRunNotice("tip text", true);
+    expect(result.notice).toContain("dry-run");
+    expect(result.tip).toContain("tip text");
+  });
+
+  test("without colors produces plain text", () => {
+    const result = formatDryRunNotice("tip text", false);
+    expect(result.notice).toContain("dry-run");
+    expect(result.tip).toBe("tip text");
   });
 });

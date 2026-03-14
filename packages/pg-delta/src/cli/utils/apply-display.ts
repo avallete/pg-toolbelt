@@ -11,6 +11,8 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Diagnostic } from "@supabase/pg-topo";
+import chalk from "chalk";
+import type { RoundResult } from "../../core/declarative-apply/index.ts";
 import type { StatementError } from "../../core/declarative-apply/round-apply.ts";
 
 /**
@@ -59,7 +61,7 @@ export type DiagnosticDisplayEntry = {
 };
 
 /** One display row for a diagnostic (or a group of same-code diagnostics with multiple locations). */
-type DiagnosticDisplayItem = {
+export type DiagnosticDisplayItem = {
   code: string;
   message: string;
   suggestedFix?: string;
@@ -235,4 +237,106 @@ export async function formatStatementError(
     lines.push(`Location: ${err.statement.id}`);
   }
   return lines.map((l) => `  ${l}`).join("\n");
+}
+
+// ============================================================================
+// Color-aware formatting (presentation boundary)
+// ============================================================================
+
+const identity = (s: string) => s;
+
+/**
+ * Format a round result line with colored applied/deferred/failed counts.
+ */
+export function formatRoundStatus(
+  round: RoundResult,
+  useColors: boolean,
+): string {
+  const green = useColors ? chalk.green : identity;
+  const yellow = useColors ? chalk.yellow : identity;
+  const red = useColors ? chalk.red : identity;
+  const parts = [`Round ${round.round}:`, green(`${round.applied} applied`)];
+  if (round.deferred > 0) parts.push(yellow(`${round.deferred} deferred`));
+  if (round.failed > 0) parts.push(red(`${round.failed} failed`));
+  return parts.join("  ");
+}
+
+/** Diagnostic code → color function mapping for display. */
+const diagnosticColorMap: Record<string, (s: string) => string> = {
+  DUPLICATE_PRODUCER: chalk.yellow,
+  CYCLE_EDGE_SKIPPED: chalk.red,
+  UNRESOLVED_DEPENDENCY: chalk.dim,
+};
+
+/**
+ * Render a block of diagnostic display items into a formatted string.
+ * Handles grouping, location preview, object keys, and suggested fixes.
+ */
+export function formatDiagnosticsBlock(
+  items: DiagnosticDisplayItem[],
+  warningCount: number,
+  options: {
+    useColors: boolean;
+    ungroupDiagnostics: boolean;
+    previewLimit?: number;
+  },
+): string {
+  const { useColors, ungroupDiagnostics, previewLimit = 5 } = options;
+  const defaultColor = useColors ? chalk.yellow : identity;
+
+  const lines: string[] = [
+    `\n${warningCount} diagnostic(s) from static analysis:\n`,
+  ];
+
+  let lastCode = "";
+  for (const item of items) {
+    if (item.code !== lastCode) {
+      if (lastCode !== "") {
+        lines.push("\n");
+      }
+      lastCode = item.code;
+    }
+
+    const colorFn = useColors
+      ? (diagnosticColorMap[item.code] ?? defaultColor)
+      : identity;
+    const location = item.locations.length > 0 ? ` (${item.locations[0]})` : "";
+    const occurrences =
+      !ungroupDiagnostics && item.locations.length > 1
+        ? ` x${item.locations.length}`
+        : "";
+    lines.push(
+      colorFn(`  [${item.code}]${location}${occurrences} ${item.message}\n`),
+    );
+
+    if (!ungroupDiagnostics && item.requiredObjectKey) {
+      lines.push(colorFn(`    -> Object: ${item.requiredObjectKey}\n`));
+    }
+    if (!ungroupDiagnostics && item.locations.length > 1) {
+      for (const locationEntry of item.locations.slice(0, previewLimit)) {
+        lines.push(colorFn(`    at ${locationEntry}\n`));
+      }
+      const remaining = item.locations.length - previewLimit;
+      if (remaining > 0) {
+        lines.push(colorFn(`    ... and ${remaining} more location(s)\n`));
+      }
+    }
+    if (item.suggestedFix) {
+      lines.push(colorFn(`    -> Fix: ${item.suggestedFix}\n`));
+    }
+  }
+
+  return lines.join("");
+}
+
+/**
+ * Apply error/warning coloring to a formatted statement error string.
+ */
+export function colorStatementError(
+  formatted: string,
+  severity: "error" | "warning",
+  useColors: boolean,
+): string {
+  if (!useColors) return formatted;
+  return severity === "error" ? chalk.red(formatted) : chalk.yellow(formatted);
 }

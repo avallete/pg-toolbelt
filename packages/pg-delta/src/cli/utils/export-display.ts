@@ -48,6 +48,8 @@ interface BuildFileTreeOptions {
   diff?: FileDiffResult;
   /** When true, only paths that are created, updated, or deleted are shown; unchanged are omitted. Includes diff.deleted in the tree. */
   diffFocus?: boolean;
+  /** When false, disables chalk coloring. Defaults to true. */
+  useColors?: boolean;
 }
 
 type FileStatus = "created" | "updated" | "deleted" | "unchanged";
@@ -59,7 +61,23 @@ function getFileStatus(path: string, diff: FileDiffResult): FileStatus {
   return "unchanged";
 }
 
-function formatLeafSegment(segment: string, status: FileStatus): string {
+function formatLeafSegment(
+  segment: string,
+  status: FileStatus,
+  useColors = true,
+): string {
+  if (!useColors) {
+    switch (status) {
+      case "created":
+        return `+ ${segment}`;
+      case "updated":
+        return `~ ${segment}`;
+      case "deleted":
+        return `- ${segment}`;
+      default:
+        return segment;
+    }
+  }
   switch (status) {
     case "created":
       return chalk.green(`+ ${segment}`);
@@ -87,7 +105,7 @@ export function buildFileTree(
   outputDir: string,
   options?: BuildFileTreeOptions,
 ): string {
-  const { diff, diffFocus } = options ?? {};
+  const { diff, diffFocus, useColors = true } = options ?? {};
   let pathsToShow = files;
 
   if (diffFocus && diff) {
@@ -98,7 +116,7 @@ export function buildFileTree(
     ]);
     pathsToShow = [...changed];
     if (pathsToShow.length === 0) {
-      return chalk.dim("(no file changes)");
+      return useColors ? chalk.dim("(no file changes)") : "(no file changes)";
     }
   }
 
@@ -129,7 +147,7 @@ export function buildFileTree(
     const isLeaf = !tree.has(relPath);
     const displaySegment =
       diff && isLeaf
-        ? formatLeafSegment(segment, getFileStatus(relPath, diff))
+        ? formatLeafSegment(segment, getFileStatus(relPath, diff), useColors)
         : segment;
     lines.push(prefix + displaySegment);
     const children = tree.get(relPath);
@@ -242,34 +260,69 @@ export async function computeFileDiff(
 export function formatExportSummary(
   diff: FileDiffResult,
   dryRun: boolean,
+  useColors = true,
 ): string {
   const lines: string[] = [];
   const verb = dryRun ? "Would" : "";
+  const green = useColors ? chalk.green : identity;
+  const yellow = useColors ? chalk.yellow : identity;
+  const red = useColors ? chalk.red : identity;
+  const dim = useColors ? chalk.dim : identity;
 
   if (diff.created.length > 0) {
     lines.push(
-      chalk.green(
+      green(
         `${verb ? `${verb} create` : "Created"}: ${diff.created.length} file(s)`,
       ),
     );
   }
   if (diff.updated.length > 0) {
     lines.push(
-      chalk.yellow(
+      yellow(
         `${verb ? `${verb} update` : "Updated"}: ${diff.updated.length} file(s)`,
       ),
     );
   }
   if (diff.deleted.length > 0) {
     lines.push(
-      chalk.red(
+      red(
         `${verb ? `${verb} delete` : "Deleted"}: ${diff.deleted.length} file(s)`,
       ),
     );
   }
   if (diff.unchanged.length > 0 && !dryRun) {
-    lines.push(chalk.dim(`Unchanged: ${diff.unchanged.length} file(s)`));
+    lines.push(dim(`Unchanged: ${diff.unchanged.length} file(s)`));
   }
 
   return lines.length > 0 ? lines.join("\n") : "";
+}
+
+// ============================================================================
+// Color-aware formatting (presentation boundary)
+// ============================================================================
+
+const identity = (s: string) => s;
+
+/**
+ * Format the file legend line (+ created  ~ updated  - deleted).
+ */
+export function formatFileLegend(useColors: boolean): string {
+  if (!useColors) {
+    return "+ created   ~ updated   - deleted";
+  }
+  return `${chalk.green("+")} created   ${chalk.yellow("~")} updated   ${chalk.red("-")} deleted`;
+}
+
+/**
+ * Format the dry-run notice and tip.
+ */
+export function formatDryRunNotice(
+  applyTip: string,
+  useColors: boolean,
+): { notice: string; tip: string } {
+  const notice = useColors
+    ? chalk.dim("\n(dry-run: no files written)")
+    : "\n(dry-run: no files written)";
+  const tip = useColors ? chalk.cyan(applyTip) : applyTip;
+  return { notice, tip };
 }
