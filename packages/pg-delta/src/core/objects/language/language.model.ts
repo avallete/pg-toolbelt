@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -97,77 +93,62 @@ export class Language extends BasePgModel {
   }
 }
 
-async function _extractLanguages(pool: Queryable): Promise<Language[]> {
-  const { rows: languageRows } = await pool.query<LanguageProps>(sql`
-    with extension_oids as (
-      select
-        objid
-      from
-        pg_depend d
-      where
-        d.refclassid = 'pg_extension'::regclass
-        and d.classid = 'pg_language'::regclass
-    )
-    select
-      quote_ident(lan.lanname) as name,
-      lan.lanpltrusted as is_trusted,
-      lan.lanispl as is_procedural,
-      lan.lanplcallfoid::regprocedure::text as call_handler,
-      lan.laninline::regprocedure::text as inline_handler,
-      lan.lanvalidator::regprocedure::text as validator,
-      lan.lanowner::regrole::text as owner,
-      obj_description(lan.oid, 'pg_language') as comment,
-      coalesce(
-        (
-          select json_agg(
-            json_build_object(
-              'grantee', case when x.grantee = 0 then 'PUBLIC' else x.grantee::regrole::text end,
-              'privilege', x.privilege_type,
-              'grantable', x.is_grantable
-            )
-            order by x.grantee, x.privilege_type
-          )
-          from lateral aclexplode(lan.lanacl) as x(grantor, grantee, privilege_type, is_grantable)
-        ), '[]'
-      ) as privileges
-    from
-      pg_catalog.pg_language lan
-      left outer join extension_oids e on lan.oid = e.objid
-      -- <EXCLUDE_INTERNAL and default>
-      where lan.lanname not in ('internal', 'c')
-    order by
-      lan.lanname
-  `);
-
-  // Process rows to handle "-" as null values
-  const processedRows = languageRows.map((row) => ({
-    ...row,
-    call_handler: row.call_handler === "-" ? null : row.call_handler,
-    inline_handler: row.inline_handler === "-" ? null : row.inline_handler,
-    validator: row.validator === "-" ? null : row.validator,
-  }));
-
-  // Validate and parse each row using the Effect Schema
-  const validatedRows = processedRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(languagePropsSchema)(row),
-  );
-  return validatedRows.map((row: LanguageProps) => new Language(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-// TODO: This is not used anywhere yet, but it's here for future reference.
-const _extractLanguagesEffect = (
+export const _extractLanguages = (
   db: DatabaseApi,
 ): Effect.Effect<Language[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => _extractLanguages(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractLanguages failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractLanguages",
-        cause: err,
-      }),
+  Effect.gen(function* () {
+    const { rows: languageRows } = yield* db.query<LanguageProps>(sql`
+      with extension_oids as (
+        select
+          objid
+        from
+          pg_depend d
+        where
+          d.refclassid = 'pg_extension'::regclass
+          and d.classid = 'pg_language'::regclass
+      )
+      select
+        quote_ident(lan.lanname) as name,
+        lan.lanpltrusted as is_trusted,
+        lan.lanispl as is_procedural,
+        lan.lanplcallfoid::regprocedure::text as call_handler,
+        lan.laninline::regprocedure::text as inline_handler,
+        lan.lanvalidator::regprocedure::text as validator,
+        lan.lanowner::regrole::text as owner,
+        obj_description(lan.oid, 'pg_language') as comment,
+        coalesce(
+          (
+            select json_agg(
+              json_build_object(
+                'grantee', case when x.grantee = 0 then 'PUBLIC' else x.grantee::regrole::text end,
+                'privilege', x.privilege_type,
+                'grantable', x.is_grantable
+              )
+              order by x.grantee, x.privilege_type
+            )
+            from lateral aclexplode(lan.lanacl) as x(grantor, grantee, privilege_type, is_grantable)
+          ), '[]'
+        ) as privileges
+      from
+        pg_catalog.pg_language lan
+        left outer join extension_oids e on lan.oid = e.objid
+        -- <EXCLUDE_INTERNAL and default>
+        where lan.lanname not in ('internal', 'c')
+      order by
+        lan.lanname
+    `);
+
+    // Process rows to handle "-" as null values
+    const processedRows = languageRows.map((row) => ({
+      ...row,
+      call_handler: row.call_handler === "-" ? null : row.call_handler,
+      inline_handler: row.inline_handler === "-" ? null : row.inline_handler,
+      validator: row.validator === "-" ? null : row.validator,
+    }));
+
+    // Validate and parse each row using the Effect Schema
+    const validatedRows = processedRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(languagePropsSchema)(row),
+    );
+    return validatedRows.map((row: LanguageProps) => new Language(row));
   });

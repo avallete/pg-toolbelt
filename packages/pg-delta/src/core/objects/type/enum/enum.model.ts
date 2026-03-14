@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../../services/database.ts";
+import type { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 import {
   type PrivilegeProps,
@@ -112,16 +108,19 @@ export class Enum extends BasePgModel {
   }
 }
 
-export async function extractEnums(pool: Queryable): Promise<Enum[]> {
-  const { rows: enumRows } = await pool.query<{
-    schema: string;
-    name: string;
-    sort_order: number;
-    label: string;
-    owner: string;
-    comment: string | null;
-    privileges: { grantee: string; privilege: string; grantable: boolean }[];
-  }>(sql`
+export const extractEnums = (
+  db: DatabaseApi,
+): Effect.Effect<Enum[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: enumRows } = yield* db.query<{
+      schema: string;
+      name: string;
+      sort_order: number;
+      label: string;
+      owner: string;
+      comment: string | null;
+      privileges: { grantee: string; privilege: string; grantable: boolean }[];
+    }>(sql`
 with extension_oids as (
   select
     objid
@@ -159,56 +158,39 @@ from
   and ext.objid is null
 order by
   1, 2, 3
-  `);
-  const grouped: Record<
-    string,
-    {
-      schema: string;
-      name: string;
-      owner: string;
-      labels: { sort_order: number; label: string }[];
-      comment: string | null;
-      privileges: {
-        grantee: string;
-        privilege: string;
-        grantable: boolean;
-      }[];
+    `);
+    const grouped: Record<
+      string,
+      {
+        schema: string;
+        name: string;
+        owner: string;
+        labels: { sort_order: number; label: string }[];
+        comment: string | null;
+        privileges: {
+          grantee: string;
+          privilege: string;
+          grantable: boolean;
+        }[];
+      }
+    > = {};
+    for (const e of enumRows) {
+      const key = `${e.schema}.${e.name}`;
+      if (!grouped[key]) {
+        grouped[key] = {
+          schema: e.schema,
+          name: e.name,
+          owner: e.owner,
+          labels: [],
+          comment: e.comment,
+          privileges: e.privileges,
+        };
+      }
+      grouped[key].labels.push({ sort_order: e.sort_order, label: e.label });
     }
-  > = {};
-  for (const e of enumRows) {
-    const key = `${e.schema}.${e.name}`;
-    if (!grouped[key]) {
-      grouped[key] = {
-        schema: e.schema,
-        name: e.name,
-        owner: e.owner,
-        labels: [],
-        comment: e.comment,
-        privileges: e.privileges,
-      };
-    }
-    grouped[key].labels.push({ sort_order: e.sort_order, label: e.label });
-  }
-  // Validate and parse each enum using the schema
-  const validatedEnums = Object.values(grouped).map((e) =>
-    Schema.decodeUnknownSync(enumPropsSchema)(e),
-  );
-  return validatedEnums.map((e: EnumProps) => new Enum(e));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractEnumsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Enum[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractEnums(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractEnums failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractEnums",
-        cause: err,
-      }),
+    // Validate and parse each enum using the schema
+    const validatedEnums = Object.values(grouped).map((e) =>
+      Schema.decodeUnknownSync(enumPropsSchema)(e),
+    );
+    return validatedEnums.map((e: EnumProps) => new Enum(e));
   });

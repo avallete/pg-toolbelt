@@ -5,12 +5,13 @@
 import { expect } from "bun:test";
 import { inspect } from "node:util";
 import debug from "debug";
+import { Effect } from "effect";
 import type { Pool } from "pg";
 import { diffCatalogs } from "../../src/core/catalog.diff.ts";
 import { type Catalog, extractCatalog } from "../../src/core/catalog.model.ts";
 import type { Change } from "../../src/core/change.types.ts";
 import { extractVersion } from "../../src/core/context.ts";
-import { applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
+import { applyDeclarativeSchemaPromise as applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
 import type { PgDepend } from "../../src/core/depend.ts";
 import {
   type ExportOptions,
@@ -22,8 +23,9 @@ import {
   hashStableIds,
 } from "../../src/core/fingerprint.ts";
 import type { Integration } from "../../src/core/integrations/integration.types.ts";
-import { applyPlan } from "../../src/core/plan/apply.ts";
-import { createPlan } from "../../src/core/plan/create.ts";
+import { applyPlanPromise as applyPlan } from "../../src/core/plan/apply.ts";
+import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
+import { wrapPool } from "../../src/core/services/database-live.ts";
 import { sortChanges } from "../../src/core/sort/sort-changes.ts";
 import {
   POSTGRES_VERSION_TO_ALPINE_POSTGRES_TAG,
@@ -126,9 +128,13 @@ export async function roundtripFidelityTest(
 
   // Extract catalogs from both databases
   debugTest("mainCatalog: ");
-  const mainCatalog = await extractCatalog(mainSession);
+  const mainCatalog = await Effect.runPromise(
+    extractCatalog(wrapPool(mainSession)),
+  );
   debugTest("branchCatalog: ");
-  const branchCatalog = await extractCatalog(branchSession);
+  const branchCatalog = await Effect.runPromise(
+    extractCatalog(wrapPool(branchSession)),
+  );
 
   if (expectedMainDependencies && expectedBranchDependencies) {
     validateDependencies(
@@ -218,7 +224,9 @@ export async function roundtripFidelityTest(
     });
   }
 
-  const debugMainCatalogAfter = await extractCatalog(mainSession);
+  const debugMainCatalogAfter = await Effect.runPromise(
+    extractCatalog(wrapPool(mainSession)),
+  );
   const postApplyFingerprint = hashStableIds(debugMainCatalogAfter, stableIds);
 
   if (applyResult.warnings?.length) {
@@ -356,7 +364,9 @@ export async function testDeclarativeExport(
       throw new Error("Declarative apply failed", { cause: applyResult });
     }
 
-    const finalCatalog = await extractCatalog(testPool);
+    const finalCatalog = await Effect.runPromise(
+      extractCatalog(wrapPool(testPool)),
+    );
     const exportChanges = sortedChanges;
     const { hash: finalFingerprint } = buildPlanScopeFingerprint(
       finalCatalog,
@@ -408,7 +418,9 @@ async function verifyNoRemainingChanges(
   migrationScript: string,
 ): Promise<void> {
   debugTest("mainCatalogAfter: ");
-  const mainCatalogAfter = await extractCatalog(mainSession);
+  const mainCatalogAfter = await Effect.runPromise(
+    extractCatalog(wrapPool(mainSession)),
+  );
 
   // Verify semantic equality by diffing the catalogs again
   // This ensures the migration produced a database state identical to the target
@@ -474,7 +486,7 @@ async function verifyNoRemainingChanges(
 async function getPostgresMajorVersion(
   session: Pool,
 ): Promise<PostgresVersion> {
-  const versionNum = await extractVersion(session);
+  const versionNum = await Effect.runPromise(extractVersion(wrapPool(session)));
   const major = Math.floor(versionNum / 10000) as PostgresVersion;
   if (!POSTGRES_VERSION_TO_ALPINE_POSTGRES_TAG[major]) {
     throw new Error(

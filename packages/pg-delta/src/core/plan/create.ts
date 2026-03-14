@@ -9,7 +9,7 @@ import { diffCatalogs } from "../catalog.diff.ts";
 import {
   Catalog,
   createEmptyCatalog,
-  extractCatalogEffect,
+  extractCatalog,
 } from "../catalog.model.ts";
 import type { Change } from "../change.types.ts";
 import type { DiffContext } from "../context.ts";
@@ -63,12 +63,12 @@ export type CatalogInput = string | Pool | DatabaseApi | Catalog;
  * @param options - Optional configuration
  * @returns A Plan if there are changes, null if databases are identical
  */
-export async function createPlan(
+export async function createPlanPromise(
   source: CatalogInput | null,
   target: CatalogInput,
   options: CreatePlanOptions = {},
 ): Promise<{ plan: Plan; sortedChanges: Change[]; ctx: DiffContext } | null> {
-  return createPlanEffect(source, target, options).pipe(Effect.runPromise);
+  return createPlan(source, target, options).pipe(Effect.runPromise);
 }
 
 /**
@@ -329,11 +329,7 @@ function hasRoutineChanges(changes: Change[]): boolean {
   );
 }
 
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const createPlanEffect = (
+export const createPlan = (
   source: CatalogInput | null,
   target: CatalogInput,
   options: CreatePlanOptions = {},
@@ -345,11 +341,11 @@ export const createPlanEffect = (
   | SslConfigError
 > =>
   Effect.gen(function* () {
-    const toCatalog = yield* resolveCatalogEffect(target, "target", options);
+    const toCatalog = yield* resolveCatalog(target, "target", options);
 
     const fromCatalog =
       source !== null
-        ? yield* resolveCatalogEffect(source, "source", options)
+        ? yield* resolveCatalog(source, "source", options)
         : yield* Effect.tryPromise({
             try: () =>
               createEmptyCatalog(toCatalog.version, toCatalog.currentUser),
@@ -363,7 +359,7 @@ export const createPlanEffect = (
     return buildPlanForCatalogs(fromCatalog, toCatalog, options);
   });
 
-const resolveCatalogEffect = (
+const resolveCatalog = (
   input: CatalogInput,
   label: "source" | "target",
   options: CreatePlanOptions,
@@ -385,14 +381,14 @@ const resolveCatalogEffect = (
           role: options.role,
           label,
         });
-        return yield* extractCatalogEffect(db);
+        return yield* extractCatalog(db);
       }),
     );
   }
 
   if ("withConnection" in input) {
-    return extractCatalogEffect(input);
+    return extractCatalog(input);
   }
 
-  return extractCatalogEffect(wrapPool(input));
+  return extractCatalog(wrapPool(input));
 };

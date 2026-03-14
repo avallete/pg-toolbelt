@@ -18,12 +18,14 @@
 
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { extractCatalog } from "../src/core/catalog.model.ts";
 import {
   serializeCatalog,
   stringifyCatalogSnapshot,
 } from "../src/core/catalog.snapshot.ts";
 import { createPool, endPool } from "../src/core/postgres-config.ts";
+import { wrapPool } from "../src/core/services/database-live.ts";
 import { POSTGRES_VERSION_TO_ALPINE_POSTGRES_TAG } from "../tests/constants.ts";
 import { PostgresAlpineContainer } from "../tests/postgres-alpine.ts";
 
@@ -53,7 +55,7 @@ try {
 
   try {
     console.log("Exporting catalog...");
-    const catalog = await extractCatalog(pool);
+    const catalog = await Effect.runPromise(extractCatalog(wrapPool(pool)));
     const snapshot = serializeCatalog(catalog);
     const json = stringifyCatalogSnapshot(snapshot);
     await writeFile(outputPath, json, "utf-8");

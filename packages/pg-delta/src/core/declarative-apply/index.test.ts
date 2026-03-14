@@ -1,13 +1,18 @@
 import { describe, expect, mock, test } from "bun:test";
+import { Effect } from "effect";
 import type { Pool } from "pg";
-import { applyDeclarativeSchema } from "./index.ts";
+import { CatalogExtractionError } from "../errors.ts";
+import { applyDeclarativeSchemaPromise as applyDeclarativeSchema } from "./index.ts";
 
-// Mock extractCatalogProviders to throw, simulating an early failure
+// Mock extractCatalogProviders to fail, simulating an early failure
 // before roundApply is ever reached.
 mock.module("./extract-catalog-providers.ts", () => ({
-  extractCatalogProviders: async () => {
-    throw new Error("simulated catalog extraction failure");
-  },
+  extractCatalogProviders: () =>
+    Effect.fail(
+      new CatalogExtractionError({
+        message: "simulated catalog extraction failure",
+      }),
+    ),
 }));
 
 // Track the pool created internally via createManagedPool so we can verify cleanup.

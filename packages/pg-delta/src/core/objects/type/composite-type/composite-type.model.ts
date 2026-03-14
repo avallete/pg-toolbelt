@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../../services/database.ts";
+import type { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import {
   BasePgModel,
   columnPropsSchema,
@@ -141,10 +137,11 @@ export class CompositeType extends BasePgModel implements TableLikeObject {
   }
 }
 
-export async function extractCompositeTypes(
-  pool: Queryable,
-): Promise<CompositeType[]> {
-  const { rows: compositeTypeRows } = await pool.query<CompositeTypeProps>(sql`
+export const extractCompositeTypes = (
+  db: DatabaseApi,
+): Effect.Effect<CompositeType[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: compositeTypeRows } = yield* db.query<CompositeTypeProps>(sql`
       WITH extension_oids AS (
         SELECT objid
         FROM pg_depend d
@@ -250,26 +247,11 @@ export async function extractCompositeTypes(
       ORDER BY ct.schema, ct.name
   `);
 
-  // Validate and parse each row using the schema
-  const validatedRows = compositeTypeRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(compositeTypePropsSchema)(row),
-  );
-  return validatedRows.map((row: CompositeTypeProps) => new CompositeType(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractCompositeTypesEffect = (
-  db: DatabaseApi,
-): Effect.Effect<CompositeType[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractCompositeTypes(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractCompositeTypes failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractCompositeTypes",
-        cause: err,
-      }),
+    // Validate and parse each row using the schema
+    const validatedRows = compositeTypeRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(compositeTypePropsSchema)(row),
+    );
+    return validatedRows.map(
+      (row: CompositeTypeProps) => new CompositeType(row),
+    );
   });

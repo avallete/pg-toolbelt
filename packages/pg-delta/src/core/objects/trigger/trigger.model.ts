@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const TriggerEnabledSchema = Schema.Literals([
@@ -154,8 +150,11 @@ export class Trigger extends BasePgModel {
   }
 }
 
-export async function extractTriggers(pool: Queryable): Promise<Trigger[]> {
-  const { rows: triggerRows } = await pool.query<TriggerProps>(sql`
+export const extractTriggers = (
+  db: DatabaseApi,
+): Effect.Effect<Trigger[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: triggerRows } = yield* db.query<TriggerProps>(sql`
       with extension_trigger_oids as (
         select objid
         from pg_depend d
@@ -260,26 +259,9 @@ export async function extractTriggers(pool: Queryable): Promise<Trigger[]> {
 
       order by 1, 2
   `);
-  // Validate and parse each row using the schema
-  const validatedRows = triggerRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(triggerPropsSchema)(row),
-  );
-  return validatedRows.map((row: TriggerProps) => new Trigger(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractTriggersEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Trigger[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractTriggers(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractTriggers failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractTriggers",
-        cause: err,
-      }),
+    // Validate and parse each row using the schema
+    const validatedRows = triggerRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(triggerPropsSchema)(row),
+    );
+    return validatedRows.map((row: TriggerProps) => new Trigger(row));
   });

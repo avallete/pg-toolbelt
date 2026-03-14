@@ -1,6 +1,7 @@
 import { test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { diffCatalogs } from "../../src/core/catalog.diff.ts";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
 import type { Change } from "../../src/core/change.types.ts";
@@ -14,6 +15,7 @@ import {
   RevokeRoleMembership,
 } from "../../src/core/objects/role/changes/role.privilege.ts";
 import { createPool } from "../../src/core/postgres-config.ts";
+import { wrapPool } from "../../src/core/services/database-live.ts";
 import { sortChanges } from "../../src/core/sort/sort-changes.ts";
 import { withDb } from "../utils.ts";
 
@@ -28,8 +30,8 @@ test.skip(
     const remote = createPool(process.env.DATABASE_URL!);
 
     const [mainCatalog, branchCatalog] = await Promise.all([
-      extractCatalog(main),
-      extractCatalog(remote),
+      Effect.runPromise(extractCatalog(wrapPool(main))),
+      Effect.runPromise(extractCatalog(wrapPool(remote))),
     ]);
 
     const changes = diffCatalogs(mainCatalog, branchCatalog);
@@ -123,8 +125,8 @@ test.skip(
 
       // Verify that the migration was successful by diffing again
       const [mainCatalogAfter, branchCatalogAfter] = await Promise.all([
-        extractCatalog(main),
-        extractCatalog(remote),
+        Effect.runPromise(extractCatalog(wrapPool(main))),
+        Effect.runPromise(extractCatalog(wrapPool(remote))),
       ]);
 
       const changesAfter = diffCatalogs(mainCatalogAfter, branchCatalogAfter);

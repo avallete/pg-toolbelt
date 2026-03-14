@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema as EffectSchema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -65,8 +61,11 @@ export class Schema extends BasePgModel {
   }
 }
 
-export async function extractSchemas(pool: Queryable): Promise<Schema[]> {
-  const { rows: schemaRows } = await pool.query<SchemaProps>(sql`
+export const extractSchemas = (
+  db: DatabaseApi,
+): Effect.Effect<Schema[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: schemaRows } = yield* db.query<SchemaProps>(sql`
     with extension_oids as (
       select
         objid
@@ -103,26 +102,9 @@ export async function extractSchemas(pool: Queryable): Promise<Schema[]> {
     order by
       1
   `);
-  // Validate and parse each row using the Effect Schema
-  const validatedRows = schemaRows.map((row: unknown) =>
-    EffectSchema.decodeUnknownSync(schemaPropsSchema)(row),
-  );
-  return validatedRows.map((row: SchemaProps) => new Schema(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractSchemasEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Schema[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractSchemas(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractSchemas failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractSchemas",
-        cause: err,
-      }),
+    // Validate and parse each row using the Effect Schema
+    const validatedRows = schemaRows.map((row: unknown) =>
+      EffectSchema.decodeUnknownSync(schemaPropsSchema)(row),
+    );
+    return validatedRows.map((row: SchemaProps) => new Schema(row));
   });

@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const TableRelkindSchema = Schema.Literals([
@@ -209,8 +205,11 @@ export class Index extends BasePgModel {
   }
 }
 
-export async function extractIndexes(pool: Queryable): Promise<Index[]> {
-  const { rows: indexRows } = await pool.query<IndexProps>(sql`
+export const extractIndexes = (
+  db: DatabaseApi,
+): Effect.Effect<Index[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: indexRows } = yield* db.query<IndexProps>(sql`
       with extension_oids as (
         select objid
         from pg_depend d
@@ -366,26 +365,9 @@ export async function extractIndexes(pool: Queryable): Promise<Index[]> {
 
       order by 1, 2
   `);
-  // Validate and parse each row using the schema
-  const validatedRows = indexRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(indexPropsSchema)(row),
-  );
-  return validatedRows.map((row: IndexProps) => new Index(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractIndexesEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Index[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractIndexes(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractIndexes failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractIndexes",
-        cause: err,
-      }),
+    // Validate and parse each row using the schema
+    const validatedRows = indexRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(indexPropsSchema)(row),
+    );
+    return validatedRows.map((row: IndexProps) => new Index(row));
   });

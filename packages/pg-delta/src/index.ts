@@ -15,7 +15,7 @@ export {
   serializeCatalog,
   stringifyCatalogSnapshot,
 } from "./core/catalog.snapshot.ts";
-export { loadDeclarativeSchema } from "./core/declarative-apply/discover-sql.ts";
+export { loadDeclarativeSchemaPromise as loadDeclarativeSchema } from "./core/declarative-apply/discover-sql.ts";
 export type {
   DeclarativeApplyResult,
   SqlFileEntry,

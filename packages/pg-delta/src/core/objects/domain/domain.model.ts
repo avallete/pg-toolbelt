@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -120,8 +116,11 @@ export class Domain extends BasePgModel {
  * @param sql - The SQL client.
  * @returns A list of domains.
  */
-export async function extractDomains(pool: Queryable): Promise<Domain[]> {
-  const { rows: domainRows } = await pool.query<DomainProps>(sql`
+export const extractDomains = (
+  db: DatabaseApi,
+): Effect.Effect<Domain[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: domainRows } = yield* db.query<DomainProps>(sql`
       with extension_oids as (
         select
           objid
@@ -184,27 +183,10 @@ export async function extractDomains(pool: Queryable): Promise<Domain[]> {
         and t.typtype = 'd'
       order by
         1, 2
-  `);
-  // Validate and parse each row using the schema
-  const validatedRows = domainRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(domainPropsSchema)(row),
-  );
-  return validatedRows.map((row: DomainProps) => new Domain(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractDomainsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Domain[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractDomains(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractDomains failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractDomains",
-        cause: err,
-      }),
+    `);
+    // Validate and parse each row using the schema
+    const validatedRows = domainRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(domainPropsSchema)(row),
+    );
+    return validatedRows.map((row: DomainProps) => new Domain(row));
   });

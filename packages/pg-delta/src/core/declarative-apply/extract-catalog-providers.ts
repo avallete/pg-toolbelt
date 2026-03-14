@@ -59,13 +59,13 @@ function addProvider(
  *   real schema and "public" (via addProvider's alsoUnderPublic) so
  *   unqualified references in SQL resolve the same way the parser does.
  */
-export async function extractCatalogProviders(
+export async function extractCatalogProvidersFromPool(
   pool: Pool,
 ): Promise<ObjectRef[]> {
-  return extractCatalogProvidersEffect(wrapPool(pool)).pipe(Effect.runPromise);
+  return extractCatalogProviders(wrapPool(pool)).pipe(Effect.runPromise);
 }
 
-export const extractCatalogProvidersEffect = (
+export const extractCatalogProviders = (
   db: DatabaseApi,
 ): Effect.Effect<ObjectRef[], CatalogExtractionError> =>
   Effect.gen(function* () {

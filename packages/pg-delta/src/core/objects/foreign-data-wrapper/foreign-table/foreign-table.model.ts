@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../../services/database.ts";
+import type { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import {
   BasePgModel,
   columnPropsSchema,
@@ -113,10 +109,11 @@ export class ForeignTable extends BasePgModel implements TableLikeObject {
   }
 }
 
-export async function extractForeignTables(
-  pool: Queryable,
-): Promise<ForeignTable[]> {
-  const { rows: tableRows } = await pool.query<ForeignTableProps>(sql`
+export const extractForeignTables = (
+  db: DatabaseApi,
+): Effect.Effect<ForeignTable[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: tableRows } = yield* db.query<ForeignTableProps>(sql`
       with extension_oids as (
         select objid
         from pg_depend d
@@ -225,40 +222,23 @@ export async function extractForeignTables(
         ft.schema, ft.name
   `);
 
-  // Validate and parse each row using the schema
-  const validatedRows = tableRows.map((row: unknown) => {
-    const parsed = Schema.decodeUnknownSync(foreignTablePropsSchema)(row);
-    // Parse options from PostgreSQL format ['key=value'] to ['key', 'value']
-    let options = parsed.options;
-    if (options && options.length > 0) {
-      const parsedOptions: string[] = [];
-      for (const opt of options) {
-        const eqIndex = opt.indexOf("=");
-        if (eqIndex > 0) {
-          parsedOptions.push(opt.substring(0, eqIndex));
-          parsedOptions.push(opt.substring(eqIndex + 1));
+    // Validate and parse each row using the schema
+    const validatedRows = tableRows.map((row: unknown) => {
+      const parsed = Schema.decodeUnknownSync(foreignTablePropsSchema)(row);
+      // Parse options from PostgreSQL format ['key=value'] to ['key', 'value']
+      let options = parsed.options;
+      if (options && options.length > 0) {
+        const parsedOptions: string[] = [];
+        for (const opt of options) {
+          const eqIndex = opt.indexOf("=");
+          if (eqIndex > 0) {
+            parsedOptions.push(opt.substring(0, eqIndex));
+            parsedOptions.push(opt.substring(eqIndex + 1));
+          }
         }
+        options = parsedOptions.length > 0 ? parsedOptions : null;
       }
-      options = parsedOptions.length > 0 ? parsedOptions : null;
-    }
-    return { ...parsed, options };
-  });
-  return validatedRows.map((row: ForeignTableProps) => new ForeignTable(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractForeignTablesEffect = (
-  db: DatabaseApi,
-): Effect.Effect<ForeignTable[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractForeignTables(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractForeignTables failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractForeignTables",
-        cause: err,
-      }),
+      return { ...parsed, options };
+    });
+    return validatedRows.map((row: ForeignTableProps) => new ForeignTable(row));
   });

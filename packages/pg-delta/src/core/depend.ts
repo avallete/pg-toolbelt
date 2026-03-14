@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema as EffectSchema } from "effect";
-import { CatalogExtractionError } from "./errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "./services/database.ts";
+import type { CatalogExtractionError } from "./errors.ts";
+import type { DatabaseApi } from "./services/database.ts";
 
 /**
  * Dependency type as defined in PostgreSQL's pg_depend.deptype.
@@ -46,10 +42,11 @@ export type PgDepend = typeof PgDependSchema.Type;
  *  - membership:<role>-><member> -> role:<role>
  *  - membership:<role>-><member> -> role:<member>
  */
-async function extractPrivilegeAndMembershipDepends(
-  pool: Queryable,
-): Promise<PgDepend[]> {
-  const { rows } = await pool.query<PgDepend>(sql`
+function extractPrivilegeAndMembershipDepends(
+  db: DatabaseApi,
+): Effect.Effect<PgDepend[], CatalogExtractionError> {
+  return Effect.gen(function* () {
+    const { rows } = yield* db.query<PgDepend>(sql`
 with
   -- OBJECT PRIVILEGES (relations)
   extension_rel_oids as (
@@ -505,7 +502,8 @@ where dependent_stable_id <> referenced_stable_id
   )
   `);
 
-  return rows;
+    return rows;
+  });
 }
 
 /**
@@ -514,8 +512,11 @@ where dependent_stable_id <> referenced_stable_id
  * @param params - Object containing arrays of OIDs for filtering (user_oids, user_namespace_oids, etc.)
  * @returns Array of dependency objects with class names.
  */
-export async function extractDepends(pool: Queryable): Promise<PgDepend[]> {
-  const { rows: dependsRows } = await pool.query<PgDepend>(sql`
+export function extractDepends(
+  db: DatabaseApi,
+): Effect.Effect<PgDepend[], CatalogExtractionError> {
+  return Effect.gen(function* () {
+    const { rows: dependsRows } = yield* db.query<PgDepend>(sql`
   WITH ids AS (
     -- only the objects that actually show up in dependencies (both sides)
     SELECT DISTINCT classid, objid, objsubid FROM pg_depend WHERE deptype IN ('n','a')
@@ -1862,32 +1863,16 @@ export async function extractDepends(pool: Queryable): Promise<PgDepend[]> {
   ORDER BY dependent_stable_id, referenced_stable_id;
   `);
 
-  // Extract privilege and membership dependencies
-  const privilegeDepends = await extractPrivilegeAndMembershipDepends(pool);
+    // Extract privilege and membership dependencies
+    const privilegeDepends = yield* extractPrivilegeAndMembershipDepends(db);
 
-  // Combine all dependency sources and remove duplicates
-  const allDepends = new Set([...dependsRows, ...privilegeDepends]);
+    // Combine all dependency sources and remove duplicates
+    const allDepends = new Set([...dependsRows, ...privilegeDepends]);
 
-  return Array.from(allDepends).sort(
-    (a, b) =>
-      a.dependent_stable_id.localeCompare(b.dependent_stable_id) ||
-      a.referenced_stable_id.localeCompare(b.referenced_stable_id),
-  );
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractDependsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<PgDepend[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractDepends(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractDepends failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractDepends",
-        cause: err,
-      }),
+    return Array.from(allDepends).sort(
+      (a, b) =>
+        a.dependent_stable_id.localeCompare(b.dependent_stable_id) ||
+        a.referenced_stable_id.localeCompare(b.referenced_stable_id),
+    );
   });
+}

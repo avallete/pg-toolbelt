@@ -53,7 +53,7 @@ function toStablePath(absolutePath: string, basePath: string): string {
  * @throws If schemaPath does not exist, is not a file/directory, or any file cannot be read.
  *         Error message includes path and code (e.g. ENOENT, EACCES) for CLI to display.
  */
-export async function loadDeclarativeSchema(
+export async function loadDeclarativeSchemaPromise(
   schemaPath: string,
 ): Promise<SqlFileEntry[]> {
   const resolvedRoot = path.resolve(schemaPath);
@@ -108,15 +108,11 @@ export async function loadDeclarativeSchema(
   return entries;
 }
 
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const loadDeclarativeSchemaEffect = (
+export const loadDeclarativeSchema = (
   schemaPath: string,
 ): Effect.Effect<SqlFileEntry[], FileDiscoveryError> =>
   Effect.tryPromise({
-    try: () => loadDeclarativeSchema(schemaPath),
+    try: () => loadDeclarativeSchemaPromise(schemaPath),
     catch: (err) =>
       new FileDiscoveryError({
         message: `loadDeclarativeSchema failed: ${err instanceof Error ? err.message : err}`,

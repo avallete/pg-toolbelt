@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { createPlan } from "../../src/core/plan/create.ts";
+import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
 import { createPool } from "../../src/core/postgres-config.ts";
 import {
   POSTGRES_VERSION_TO_ALPINE_POSTGRES_TAG,

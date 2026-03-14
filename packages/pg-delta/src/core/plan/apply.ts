@@ -5,7 +5,7 @@
 import { Effect } from "effect";
 import type { Pool } from "pg";
 import { diffCatalogs } from "../catalog.diff.ts";
-import { extractCatalogEffect } from "../catalog.model.ts";
+import { extractCatalog } from "../catalog.model.ts";
 import type { DiffContext } from "../context.ts";
 import {
   AlreadyAppliedError,
@@ -50,13 +50,13 @@ function isSessionStatement(statement: string): boolean {
  * Validates fingerprints before and after application to ensure plan integrity.
  */
 
-export async function applyPlan(
+export async function applyPlanPromise(
   plan: Plan,
   source: ConnectionInput,
   target: ConnectionInput,
   options: ApplyPlanOptions = {},
 ): Promise<ApplyPlanResult> {
-  const result = await applyPlanEffect(plan, source, target, options).pipe(
+  const result = await applyPlan(plan, source, target, options).pipe(
     Effect.result,
     Effect.runPromise,
   );
@@ -99,16 +99,12 @@ export async function applyPlan(
   }
 }
 
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
 type ApplyPlanSuccess = {
   statements: number;
   warnings?: string[];
 };
 
-export const applyPlanEffect = (
+export const applyPlan = (
   plan: Plan,
   source: ConnectionInput,
   target: ConnectionInput,
@@ -131,12 +127,12 @@ export const applyPlanEffect = (
       });
     }
 
-    const currentDb = yield* resolveDatabaseEffect(source, "source", plan.role);
-    const desiredDb = yield* resolveDatabaseEffect(target, "target", plan.role);
+    const currentDb = yield* resolveDatabase(source, "source", plan.role);
+    const desiredDb = yield* resolveDatabase(target, "target", plan.role);
 
     const [currentCatalog, desiredCatalog] = yield* Effect.all([
-      extractCatalogEffect(currentDb),
-      extractCatalogEffect(desiredDb),
+      extractCatalog(currentDb),
+      extractCatalog(desiredDb),
     ]);
 
     const changes = diffCatalogs(currentCatalog, desiredCatalog);
@@ -187,9 +183,7 @@ export const applyPlanEffect = (
 
     const warnings: string[] = [];
     if (options.verifyPostApply !== false) {
-      const verification = yield* extractCatalogEffect(currentDb).pipe(
-        Effect.result,
-      );
+      const verification = yield* extractCatalog(currentDb).pipe(Effect.result);
       if (verification._tag === "Failure") {
         warnings.push(
           `Could not verify post-apply fingerprint: ${verification.failure.message}`,
@@ -215,7 +209,7 @@ export const applyPlanEffect = (
     };
   });
 
-const resolveDatabaseEffect = (
+const resolveDatabase = (
   input: ConnectionInput,
   label: "source" | "target",
   role: string | undefined,

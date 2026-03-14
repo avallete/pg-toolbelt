@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { Pool } from "pg";
+import { Effect } from "effect";
+import type { DatabaseApi } from "../../services/database.ts";
 import { Extension, extractExtensions } from "./extension.model.ts";
 
 describe("Extension", () => {
@@ -50,40 +51,42 @@ describe("Extension", () => {
 });
 
 describe("extractExtensions", () => {
-  test("returns empty array when pool returns no rows", async () => {
-    const pool = {
-      query: async () => ({ rows: [] }),
-    } as unknown as Pool;
-    const result = await extractExtensions(pool);
+  test("returns empty array when db returns no rows", async () => {
+    const db = {
+      query: () => Effect.succeed({ rows: [], rowCount: 0 }),
+    } as unknown as DatabaseApi;
+    const result = await extractExtensions(db).pipe(Effect.runPromise);
     expect(result).toEqual([]);
   });
 
   test("returns Extension instances for valid rows", async () => {
-    const pool = {
-      query: async () => ({
-        rows: [
-          {
-            name: "plpgsql",
-            schema: "pg_catalog",
-            relocatable: false,
-            version: "1.0",
-            owner: "postgres",
-            comment: null,
-            members: [],
-          },
-          {
-            name: "vector",
-            schema: "extensions",
-            relocatable: true,
-            version: "0.7.0",
-            owner: "postgres",
-            comment: null,
-            members: ["type:extensions.vector", "table:extensions.vector"],
-          },
-        ],
-      }),
-    } as unknown as Pool;
-    const result = await extractExtensions(pool);
+    const db = {
+      query: () =>
+        Effect.succeed({
+          rows: [
+            {
+              name: "plpgsql",
+              schema: "pg_catalog",
+              relocatable: false,
+              version: "1.0",
+              owner: "postgres",
+              comment: null,
+              members: [],
+            },
+            {
+              name: "vector",
+              schema: "extensions",
+              relocatable: true,
+              version: "0.7.0",
+              owner: "postgres",
+              comment: null,
+              members: ["type:extensions.vector", "table:extensions.vector"],
+            },
+          ],
+          rowCount: 2,
+        }),
+    } as unknown as DatabaseApi;
+    const result = await extractExtensions(db).pipe(Effect.runPromise);
     expect(result).toHaveLength(2);
     expect(result[0]).toBeInstanceOf(Extension);
     expect(result[0].name).toBe("plpgsql");

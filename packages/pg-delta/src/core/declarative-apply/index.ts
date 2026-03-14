@@ -15,7 +15,7 @@ import type { Pool } from "pg";
 import { DeclarativeApplyError } from "../errors.ts";
 import type { DatabaseApi } from "../services/database.ts";
 import { makeScopedPool, wrapPool } from "../services/database-live.ts";
-import { extractCatalogProvidersEffect } from "./extract-catalog-providers.ts";
+import { extractCatalogProviders } from "./extract-catalog-providers.ts";
 import {
   type ApplyResult,
   type RoundResult,
@@ -93,10 +93,10 @@ function remapStatementId(
  * 3. Apply statements round-by-round to the target database
  * 4. Optionally validate function bodies in a final pass
  */
-export async function applyDeclarativeSchema(
+export async function applyDeclarativeSchemaPromise(
   options: DeclarativeApplyOptions,
 ): Promise<DeclarativeApplyResult> {
-  return applyDeclarativeSchemaEffect(options).pipe(Effect.runPromise);
+  return applyDeclarativeSchema(options).pipe(Effect.runPromise);
 }
 
 export type { SqlFileEntry } from "./discover-sql.ts";
@@ -106,11 +106,7 @@ export { loadDeclarativeSchema } from "./discover-sql.ts";
 // Re-export result types for callers that need them (StatementError is imported from round-apply directly where needed)
 export type { ApplyResult, RoundResult } from "./round-apply.ts";
 
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const applyDeclarativeSchemaEffect = (
+export const applyDeclarativeSchema = (
   options: DeclarativeApplyOptions,
 ): Effect.Effect<DeclarativeApplyResult, DeclarativeApplyError> =>
   Effect.gen(function* () {
@@ -128,8 +124,8 @@ export const applyDeclarativeSchemaEffect = (
       return emptyApplyResult([]);
     }
 
-    const db = yield* resolveDatabaseEffect(targetUrl, providedPool);
-    const externalProviders = yield* extractCatalogProvidersEffect(db).pipe(
+    const db = yield* resolveDatabase(targetUrl, providedPool);
+    const externalProviders = yield* extractCatalogProviders(db).pipe(
       Effect.mapError(
         (error) =>
           new DeclarativeApplyError({
@@ -204,7 +200,7 @@ const emptyApplyResult = (
   totalStatements: 0,
 });
 
-const resolveDatabaseEffect = (
+const resolveDatabase = (
   targetUrl: string | undefined,
   providedPool: Pool | DatabaseApi | undefined,
 ): Effect.Effect<DatabaseApi, DeclarativeApplyError> => {

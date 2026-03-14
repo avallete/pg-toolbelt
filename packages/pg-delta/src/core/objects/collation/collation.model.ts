@@ -1,12 +1,8 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
 import { extractVersion } from "../../context.ts";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 /**
@@ -106,15 +102,18 @@ export class Collation extends BasePgModel {
   }
 }
 
-export async function extractCollations(pool: Queryable): Promise<Collation[]> {
-  const version = await extractVersion(pool);
-  const isPostgres17OrGreater = version >= 170000;
-  const isPostgres16OrGreater = version >= 160000;
+export const extractCollations = (
+  db: DatabaseApi,
+): Effect.Effect<Collation[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const version = yield* extractVersion(db);
+    const isPostgres17OrGreater = version >= 170000;
+    const isPostgres16OrGreater = version >= 160000;
 
-  let collationRows: CollationProps[];
+    let collationRows: CollationProps[];
 
-  if (isPostgres17OrGreater) {
-    const result = await pool.query<CollationProps>(sql`
+    if (isPostgres17OrGreater) {
+      const result = yield* db.query<CollationProps>(sql`
       with extension_oids as (
         select
           objid
@@ -145,10 +144,10 @@ export async function extractCollations(pool: Queryable): Promise<Collation[]> {
       order by
         1, 2
     `);
-    collationRows = result.rows;
-  } else if (isPostgres16OrGreater) {
-    // On postgres 16 there colllocale column was named colliculocale
-    const result = await pool.query<CollationProps>(sql`
+      collationRows = result.rows;
+    } else if (isPostgres16OrGreater) {
+      // On postgres 16 there colllocale column was named colliculocale
+      const result = yield* db.query<CollationProps>(sql`
       with extension_oids as (
         select
           objid
@@ -181,10 +180,10 @@ export async function extractCollations(pool: Queryable): Promise<Collation[]> {
       order by
         1, 2
     `);
-    collationRows = result.rows;
-  } else {
-    // On postgres 15 icu_rules does not exist
-    const result = await pool.query<CollationProps>(sql`
+      collationRows = result.rows;
+    } else {
+      // On postgres 15 icu_rules does not exist
+      const result = yield* db.query<CollationProps>(sql`
       with extension_oids as (
         select
           objid
@@ -217,29 +216,12 @@ export async function extractCollations(pool: Queryable): Promise<Collation[]> {
       order by
         1, 2
     `);
-    collationRows = result.rows;
-  }
+      collationRows = result.rows;
+    }
 
-  // Validate and parse each row using the schema
-  const validatedRows = collationRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(collationPropsSchema)(row),
-  );
-  return validatedRows.map((row: CollationProps) => new Collation(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractCollationsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Collation[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractCollations(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractCollations failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractCollations",
-        cause: err,
-      }),
+    // Validate and parse each row using the schema
+    const validatedRows = collationRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(collationPropsSchema)(row),
+    );
+    return validatedRows.map((row: CollationProps) => new Collation(row));
   });

@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 /**
@@ -82,8 +78,11 @@ export class Extension extends BasePgModel {
 }
 
 // TODO: fetch extension dependencies so we can determine when to use CASCADE on creation
-export async function extractExtensions(pool: Queryable): Promise<Extension[]> {
-  const { rows: extensionRows } = await pool.query<ExtensionProps>(sql`
+export const extractExtensions = (
+  db: DatabaseApi,
+): Effect.Effect<Extension[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: extensionRows } = yield* db.query<ExtensionProps>(sql`
   with extension_rows as (
     select
       e.oid,
@@ -276,26 +275,9 @@ export async function extractExtensions(pool: Queryable): Promise<Extension[]> {
   order by
     er.name
   `);
-  // Validate and parse each row using the Effect Schema
-  const validatedRows = extensionRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(extensionPropsSchema)(row),
-  );
-  return validatedRows.map((row: ExtensionProps) => new Extension(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractExtensionsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Extension[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractExtensions(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractExtensions failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractExtensions",
-        cause: err,
-      }),
+    // Validate and parse each row using the Effect Schema
+    const validatedRows = extensionRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(extensionPropsSchema)(row),
+    );
+    return validatedRows.map((row: ExtensionProps) => new Extension(row));
   });

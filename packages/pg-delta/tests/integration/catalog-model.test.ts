@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
+import { wrapPool } from "../../src/core/services/database-live.ts";
 import { POSTGRES_VERSIONS } from "../constants.ts";
 import { withDb, withDbSupabaseIsolated } from "../utils.ts";
 
@@ -22,7 +24,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         CREATE TABLE schema_b.table_b (id int);
       `);
 
-        const catalog = await extractCatalog(db.main);
+        const catalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
 
         // Check schemas
         expect(catalog.schemas["schema:public"]).toBeDefined();
@@ -97,7 +101,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         );
       `);
 
-        const catalog = await extractCatalog(db.main);
+        const catalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
 
         // Test type resolution
         // biome-ignore lint/style/noNonNullAssertion: seeded data
@@ -173,7 +179,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         );
       `);
 
-        const catalog = await extractCatalog(db.main);
+        const catalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
 
         // Test composite types
         expect(Object.keys(catalog.compositeTypes)).toHaveLength(1);
@@ -214,7 +222,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         CREATE MATERIALIZED VIEW test_schema.users_mv AS SELECT id, name FROM test_schema.users;
       `);
 
-        const catalog = await extractCatalog(db.main);
+        const catalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
 
         // Test regular views
         expect(Object.keys(catalog.views)).toHaveLength(1);
@@ -259,7 +269,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         $$;
       `);
 
-        const catalog = await extractCatalog(db.main);
+        const catalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
 
         // Test sequences
         expect(Object.keys(catalog.sequences).length).toBeGreaterThan(0);
@@ -315,7 +327,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           EXECUTE FUNCTION test_schema.log_ddl();
       `);
 
-        const catalog = await extractCatalog(db.main);
+        const catalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
 
         expect(Object.keys(catalog.eventTriggers)).toHaveLength(1);
         const eventTrigger = catalog.eventTriggers["eventTrigger:ddl_logger"];
@@ -341,7 +355,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           FOR SELECT USING (true);
       `);
 
-        const catalog = await extractCatalog(db.main);
+        const catalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
 
         // Test domains
         expect(Object.keys(catalog.domains)).toHaveLength(1);
@@ -375,7 +391,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         // Test system schema filtering and role extraction
         await db.main.query("CREATE TABLE public.test_table (id int)");
 
-        const catalog = await extractCatalog(db.main);
+        const catalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
 
         // Test system schema filtering
         const schemaNames = Object.keys(catalog.schemas).map(

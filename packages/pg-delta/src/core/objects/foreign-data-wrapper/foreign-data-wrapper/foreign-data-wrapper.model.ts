@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../../services/database.ts";
+import type { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 import {
   type PrivilegeProps,
@@ -80,10 +76,11 @@ export class ForeignDataWrapper extends BasePgModel {
   }
 }
 
-export async function extractForeignDataWrappers(
-  pool: Queryable,
-): Promise<ForeignDataWrapper[]> {
-  const { rows: fdwRows } = await pool.query<ForeignDataWrapperProps>(sql`
+export const extractForeignDataWrappers = (
+  db: DatabaseApi,
+): Effect.Effect<ForeignDataWrapper[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: fdwRows } = yield* db.query<ForeignDataWrapperProps>(sql`
       with extension_oids as (
         select objid
         from pg_depend d
@@ -128,42 +125,27 @@ export async function extractForeignDataWrappers(
         fdw.fdwname
   `);
 
-  // Validate and parse each row using the schema
-  const validatedRows = fdwRows.map((row: unknown) => {
-    const parsed = Schema.decodeUnknownSync(foreignDataWrapperPropsSchema)(row);
-    // Parse options from PostgreSQL format ['key=value'] to ['key', 'value']
-    let options = parsed.options;
-    if (options && options.length > 0) {
-      const parsedOptions: string[] = [];
-      for (const opt of options) {
-        const eqIndex = opt.indexOf("=");
-        if (eqIndex > 0) {
-          parsedOptions.push(opt.substring(0, eqIndex));
-          parsedOptions.push(opt.substring(eqIndex + 1));
+    // Validate and parse each row using the schema
+    const validatedRows = fdwRows.map((row: unknown) => {
+      const parsed = Schema.decodeUnknownSync(foreignDataWrapperPropsSchema)(
+        row,
+      );
+      // Parse options from PostgreSQL format ['key=value'] to ['key', 'value']
+      let options = parsed.options;
+      if (options && options.length > 0) {
+        const parsedOptions: string[] = [];
+        for (const opt of options) {
+          const eqIndex = opt.indexOf("=");
+          if (eqIndex > 0) {
+            parsedOptions.push(opt.substring(0, eqIndex));
+            parsedOptions.push(opt.substring(eqIndex + 1));
+          }
         }
+        options = parsedOptions.length > 0 ? parsedOptions : null;
       }
-      options = parsedOptions.length > 0 ? parsedOptions : null;
-    }
-    return { ...parsed, options };
-  });
-  return validatedRows.map(
-    (row: ForeignDataWrapperProps) => new ForeignDataWrapper(row),
-  );
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractForeignDataWrappersEffect = (
-  db: DatabaseApi,
-): Effect.Effect<ForeignDataWrapper[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractForeignDataWrappers(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractForeignDataWrappers failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractForeignDataWrappers",
-        cause: err,
-      }),
+      return { ...parsed, options };
+    });
+    return validatedRows.map(
+      (row: ForeignDataWrapperProps) => new ForeignDataWrapper(row),
+    );
   });

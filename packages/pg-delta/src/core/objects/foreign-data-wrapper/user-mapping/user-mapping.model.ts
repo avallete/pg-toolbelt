@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../../services/database.ts";
+import type { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 
 /**
@@ -60,10 +56,11 @@ export class UserMapping extends BasePgModel {
   }
 }
 
-export async function extractUserMappings(
-  pool: Queryable,
-): Promise<UserMapping[]> {
-  const { rows: mappingRows } = await pool.query<UserMappingProps>(sql`
+export const extractUserMappings = (
+  db: DatabaseApi,
+): Effect.Effect<UserMapping[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: mappingRows } = yield* db.query<UserMappingProps>(sql`
       select
         case
           when um.umuser = 0 then 'PUBLIC'
@@ -81,40 +78,23 @@ export async function extractUserMappings(
         srv.srvname, um.umuser
   `);
 
-  // Validate and parse each row using the schema
-  const validatedRows = mappingRows.map((row: unknown) => {
-    const parsed = Schema.decodeUnknownSync(userMappingPropsSchema)(row);
-    // Parse options from PostgreSQL format ['key=value'] to ['key', 'value']
-    let options = parsed.options;
-    if (options && options.length > 0) {
-      const parsedOptions: string[] = [];
-      for (const opt of options) {
-        const eqIndex = opt.indexOf("=");
-        if (eqIndex > 0) {
-          parsedOptions.push(opt.substring(0, eqIndex));
-          parsedOptions.push(opt.substring(eqIndex + 1));
+    // Validate and parse each row using the schema
+    const validatedRows = mappingRows.map((row: unknown) => {
+      const parsed = Schema.decodeUnknownSync(userMappingPropsSchema)(row);
+      // Parse options from PostgreSQL format ['key=value'] to ['key', 'value']
+      let options = parsed.options;
+      if (options && options.length > 0) {
+        const parsedOptions: string[] = [];
+        for (const opt of options) {
+          const eqIndex = opt.indexOf("=");
+          if (eqIndex > 0) {
+            parsedOptions.push(opt.substring(0, eqIndex));
+            parsedOptions.push(opt.substring(eqIndex + 1));
+          }
         }
+        options = parsedOptions.length > 0 ? parsedOptions : null;
       }
-      options = parsedOptions.length > 0 ? parsedOptions : null;
-    }
-    return { ...parsed, options };
-  });
-  return validatedRows.map((row: UserMappingProps) => new UserMapping(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractUserMappingsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<UserMapping[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractUserMappings(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractUserMappings failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractUserMappings",
-        cause: err,
-      }),
+      return { ...parsed, options };
+    });
+    return validatedRows.map((row: UserMappingProps) => new UserMapping(row));
   });

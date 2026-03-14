@@ -13,8 +13,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
-import { createPlan } from "../../src/core/plan/create.ts";
+import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
+import { wrapPool } from "../../src/core/services/database-live.ts";
 import { POSTGRES_VERSIONS } from "../constants.ts";
 import { withDbIsolated } from "../utils.ts";
 
@@ -59,7 +61,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           `);
 
           // Extract the branch catalog and verify the role has deduplicated members
-          const branchCatalog = await extractCatalog(db.branch);
+          const branchCatalog = await Effect.runPromise(
+            extractCatalog(wrapPool(db.branch)),
+          );
           const parentRole = Object.values(branchCatalog.roles).find(
             (r) => r.name === "parent_role",
           );

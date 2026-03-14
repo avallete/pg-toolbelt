@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const membershipInfoSchema = Schema.Struct({
@@ -189,12 +185,15 @@ function deduplicateMembers(
   return [...map.values()];
 }
 
-export async function extractRoles(pool: Queryable): Promise<Role[]> {
-  // Check PostgreSQL version capabilities for membership options
-  const { rows: capabilitiesRows } = await pool.query<{
-    has_inherit: boolean;
-    has_set: boolean;
-  }>(sql`
+export const extractRoles = (
+  db: DatabaseApi,
+): Effect.Effect<Role[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    // Check PostgreSQL version capabilities for membership options
+    const { rows: capabilitiesRows } = yield* db.query<{
+      has_inherit: boolean;
+      has_set: boolean;
+    }>(sql`
       select
         exists (
           select 1
@@ -210,12 +209,12 @@ export async function extractRoles(pool: Queryable): Promise<Role[]> {
         ) as has_set
   `);
 
-  const capabilities = capabilitiesRows[0];
+    const capabilities = capabilitiesRows[0];
 
-  let roleRows: RoleProps[];
+    let roleRows: RoleProps[];
 
-  if (capabilities?.has_inherit && capabilities?.has_set) {
-    const result = await pool.query<RoleProps>(sql`
+    if (capabilities?.has_inherit && capabilities?.has_set) {
+      const result = yield* db.query<RoleProps>(sql`
           WITH role_memberships AS (
             SELECT
               r.rolname AS role_name,
@@ -334,9 +333,9 @@ export async function extractRoles(pool: Queryable): Promise<Role[]> {
             )
           ORDER BY 1
     `);
-    roleRows = result.rows;
-  } else {
-    const result = await pool.query<RoleProps>(sql`
+      roleRows = result.rows;
+    } else {
+      const result = yield* db.query<RoleProps>(sql`
           WITH role_memberships AS (
             SELECT
               r.rolname AS role_name,
@@ -455,29 +454,12 @@ export async function extractRoles(pool: Queryable): Promise<Role[]> {
             )
           ORDER BY 1
     `);
-    roleRows = result.rows;
-  }
+      roleRows = result.rows;
+    }
 
-  // Validate and parse each row using the schema
-  const validatedRows = roleRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(rolePropsSchema)(row),
-  );
-  return validatedRows.map((row: RoleProps) => new Role(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractRolesEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Role[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractRoles(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractRoles failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractRoles",
-        cause: err,
-      }),
+    // Validate and parse each row using the schema
+    const validatedRows = roleRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(rolePropsSchema)(row),
+    );
+    return validatedRows.map((row: RoleProps) => new Role(row));
   });

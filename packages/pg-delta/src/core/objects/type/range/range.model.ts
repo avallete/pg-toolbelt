@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../../services/database.ts";
+import type { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 import {
   type PrivilegeProps,
@@ -121,8 +117,11 @@ export class Range extends BasePgModel {
  *  - MULTIRANGE_TYPE_NAME is not included (we currently do not attempt to infer
  *    whether it differs from the default auto-generated name)
  */
-export async function extractRanges(pool: Queryable): Promise<Range[]> {
-  const { rows } = await pool.query<RangeProps>(sql`
+export const extractRanges = (
+  db: DatabaseApi,
+): Effect.Effect<Range[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows } = yield* db.query<RangeProps>(sql`
 with extension_oids as (
   select objid from pg_depend d
   where d.refclassid = 'pg_extension'::regclass and d.classid = 'pg_type'::regclass
@@ -186,25 +185,8 @@ where not t.typnamespace::regnamespace::text like any(array['pg\_%', 'informatio
   and e.objid is null
 order by 1, 2
   `);
-  const validated = rows.map((row: unknown) =>
-    Schema.decodeUnknownSync(rangePropsSchema)(row),
-  );
-  return validated.map((row: RangeProps) => new Range(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractRangesEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Range[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractRanges(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractRanges failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractRanges",
-        cause: err,
-      }),
+    const validated = rows.map((row: unknown) =>
+      Schema.decodeUnknownSync(rangePropsSchema)(row),
+    );
+    return validated.map((row: RangeProps) => new Range(row));
   });

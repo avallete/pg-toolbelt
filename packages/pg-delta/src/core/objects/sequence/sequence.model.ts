@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -107,8 +103,11 @@ export class Sequence extends BasePgModel {
   }
 }
 
-export async function extractSequences(pool: Queryable): Promise<Sequence[]> {
-  const { rows: sequenceRows } = await pool.query<SequenceProps>(sql`
+export const extractSequences = (
+  db: DatabaseApi,
+): Effect.Effect<Sequence[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: sequenceRows } = yield* db.query<SequenceProps>(sql`
 with extension_sequence_oids as (
   select
     objid
@@ -182,26 +181,9 @@ from
 order by
   1, 2
   `);
-  // Validate and parse each row using the Effect Schema
-  const validatedRows = sequenceRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(sequencePropsSchema)(row),
-  );
-  return validatedRows.map((row) => new Sequence(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractSequencesEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Sequence[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractSequences(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractSequences failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractSequences",
-        cause: err,
-      }),
+    // Validate and parse each row using the Effect Schema
+    const validatedRows = sequenceRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(sequencePropsSchema)(row),
+    );
+    return validatedRows.map((row) => new Sequence(row));
   });

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { loadDeclarativeSchema } from "./discover-sql.ts";
+import { loadDeclarativeSchemaPromise as loadDeclarativeSchema } from "./discover-sql.ts";
 
 describe("loadDeclarativeSchema", () => {
   test("throws when path does not exist", async () => {

@@ -10,12 +10,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Effect } from "effect";
 import { diffCatalogs } from "../../src/core/catalog.diff.ts";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
-import { loadDeclarativeSchema } from "../../src/core/declarative-apply/discover-sql.ts";
-import { applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
+import { loadDeclarativeSchemaPromise as loadDeclarativeSchema } from "../../src/core/declarative-apply/discover-sql.ts";
+import { applyDeclarativeSchemaPromise as applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
 import { exportDeclarativeSchema } from "../../src/core/export/index.ts";
-import { createPlan } from "../../src/core/plan/create.ts";
+import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
+import { wrapPool } from "../../src/core/services/database-live.ts";
 import { sortChanges } from "../../src/core/sort/sort-changes.ts";
 import { POSTGRES_VERSIONS } from "../constants.ts";
 import { withDb } from "../utils.ts";
@@ -81,8 +83,12 @@ async function testDeclarativeApply(options: {
     expect(applyResult.totalApplied).toBeGreaterThan(0);
 
     // 6. Verify the schema matches by diffing main vs branch
-    const mainCatalog = await extractCatalog(mainSession);
-    const branchCatalog = await extractCatalog(branchSession);
+    const mainCatalog = await Effect.runPromise(
+      extractCatalog(wrapPool(mainSession)),
+    );
+    const branchCatalog = await Effect.runPromise(
+      extractCatalog(wrapPool(branchSession)),
+    );
     const remainingChanges = diffCatalogs(mainCatalog, branchCatalog);
     const sortedRemaining = sortChanges(
       { mainCatalog, branchCatalog },

@@ -10,11 +10,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import { diffCatalogs } from "../../src/core/catalog.diff.ts";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
-import { applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
+import { applyDeclarativeSchemaPromise as applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
 import { exportDeclarativeSchema } from "../../src/core/export/index.ts";
-import { createPlan } from "../../src/core/plan/create.ts";
+import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
+import { wrapPool } from "../../src/core/services/database-live.ts";
 import { sortChanges } from "../../src/core/sort/sort-changes.ts";
 import { POSTGRES_VERSIONS, type PostgresVersion } from "../constants.ts";
 import { withDb } from "../utils.ts";
@@ -65,8 +67,12 @@ for (const pgVersion of POSTGRES_VERSIONS as PostgresVersion[]) {
           );
         }
 
-        const mainCatalog = await extractCatalog(main);
-        const branchCatalog = await extractCatalog(branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(branch)),
+        );
         const remainingChanges = diffCatalogs(mainCatalog, branchCatalog);
 
         if (remainingChanges.length > 0) {

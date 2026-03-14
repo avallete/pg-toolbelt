@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { createPlan } from "../../src/core/plan/create.ts";
+import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
 import { POSTGRES_VERSIONS } from "../constants.ts";
 import { withDb, withDbIsolated } from "../utils.ts";
 

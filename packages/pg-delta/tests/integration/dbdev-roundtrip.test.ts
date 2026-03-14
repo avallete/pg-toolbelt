@@ -24,16 +24,18 @@
 import { describe, expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { Effect } from "effect";
 import type { Pool } from "pg";
 import { diffCatalogs } from "../../src/core/catalog.diff.ts";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
-import { applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
+import { applyDeclarativeSchemaPromise as applyDeclarativeSchema } from "../../src/core/declarative-apply/index.ts";
 import { exportDeclarativeSchema } from "../../src/core/export/index.ts";
 import { compileFilterDSL } from "../../src/core/integrations/filter/dsl.ts";
 import { compileSerializeDSL } from "../../src/core/integrations/serialize/dsl.ts";
 import { supabase as supabaseIntegration } from "../../src/core/integrations/supabase.ts";
-import { createPlan } from "../../src/core/plan/create.ts";
+import { createPlanPromise as createPlan } from "../../src/core/plan/create.ts";
 import { createPool, endPool } from "../../src/core/postgres-config.ts";
+import { wrapPool } from "../../src/core/services/database-live.ts";
 import { sortChanges } from "../../src/core/sort/sort-changes.ts";
 import {
   POSTGRES_VERSION_TO_SUPABASE_POSTGRES_TAG,
@@ -183,8 +185,12 @@ describe(`dbdev declarative roundtrip (pg${pgVersion})`, () => {
         }
 
         // Diff main (post-apply) vs branch -- the supabase filter should see 0 changes
-        const mainCatalog = await extractCatalog(mainPool);
-        const branchCatalog = await extractCatalog(branchPool);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(mainPool)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(branchPool)),
+        );
         const allChanges = diffCatalogs(mainCatalog, branchCatalog);
         const remainingChanges = allChanges.filter(compiledFilter);
 

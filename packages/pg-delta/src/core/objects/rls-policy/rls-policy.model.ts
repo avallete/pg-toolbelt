@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const RlsPolicyCommandSchema = Schema.Literals([
@@ -85,10 +81,11 @@ export class RlsPolicy extends BasePgModel {
   }
 }
 
-export async function extractRlsPolicies(
-  pool: Queryable,
-): Promise<RlsPolicy[]> {
-  const { rows: policyRows } = await pool.query<RlsPolicyProps>(sql`
+export const extractRlsPolicies = (
+  db: DatabaseApi,
+): Effect.Effect<RlsPolicy[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: policyRows } = yield* db.query<RlsPolicyProps>(sql`
 with extension_policy_oids as (
   select
     objid
@@ -138,26 +135,9 @@ from
 order by
   1, 2
   `);
-  // Validate and parse each row using the schema
-  const validatedRows = policyRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(rlsPolicyPropsSchema)(row),
-  );
-  return validatedRows.map((row: RlsPolicyProps) => new RlsPolicy(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractRlsPoliciesEffect = (
-  db: DatabaseApi,
-): Effect.Effect<RlsPolicy[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractRlsPolicies(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractRlsPolicies failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractRlsPolicies",
-        cause: err,
-      }),
+    // Validate and parse each row using the schema
+    const validatedRows = policyRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(rlsPolicyPropsSchema)(row),
+    );
+    return validatedRows.map((row: RlsPolicyProps) => new RlsPolicy(row));
   });

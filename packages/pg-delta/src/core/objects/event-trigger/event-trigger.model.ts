@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const EventTriggerEnabledSchema = Schema.Literals([
@@ -76,10 +72,11 @@ export class EventTrigger extends BasePgModel {
   }
 }
 
-export async function extractEventTriggers(
-  pool: Queryable,
-): Promise<EventTrigger[]> {
-  const { rows } = await pool.query<EventTriggerProps>(sql`
+export const extractEventTriggers = (
+  db: DatabaseApi,
+): Effect.Effect<EventTrigger[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows } = yield* db.query<EventTriggerProps>(sql`
 with extension_oids as (
   select objid
   from pg_depend d
@@ -100,28 +97,11 @@ join pg_catalog.pg_proc p on p.oid = et.evtfoid
 left join extension_oids e on e.objid = et.oid
 where e.objid is null
 order by 1
-  `);
+    `);
 
-  const validatedRows = rows.map((row: unknown) =>
-    Schema.decodeUnknownSync(eventTriggerPropsSchema)(row),
-  );
+    const validatedRows = rows.map((row: unknown) =>
+      Schema.decodeUnknownSync(eventTriggerPropsSchema)(row),
+    );
 
-  return validatedRows.map((row: EventTriggerProps) => new EventTrigger(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractEventTriggersEffect = (
-  db: DatabaseApi,
-): Effect.Effect<EventTrigger[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractEventTriggers(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractEventTriggers failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractEventTriggers",
-        cause: err,
-      }),
+    return validatedRows.map((row: EventTriggerProps) => new EventTrigger(row));
   });

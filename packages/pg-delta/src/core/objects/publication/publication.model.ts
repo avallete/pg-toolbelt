@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const publicationTablePropsSchema = Schema.Struct({
@@ -129,10 +125,11 @@ export class Publication extends BasePgModel {
 /**
  * Extract all logical replication publications from the database.
  */
-export async function extractPublications(
-  pool: Queryable,
-): Promise<Publication[]> {
-  const { rows } = await pool.query<PublicationProps>(sql`
+export const extractPublications = (
+  db: DatabaseApi,
+): Effect.Effect<Publication[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows } = yield* db.query<PublicationProps>(sql`
       with extension_oids as (
         select objid
         from pg_depend d
@@ -206,25 +203,8 @@ export async function extractPublications(
       order by 1
   `);
 
-  const validated = rows.map((row) =>
-    Schema.decodeUnknownSync(publicationPropsSchema)(row),
-  );
-  return validated.map((row) => new Publication(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractPublicationsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Publication[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractPublications(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractPublications failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractPublications",
-        cause: err,
-      }),
+    const validated = rows.map((row) =>
+      Schema.decodeUnknownSync(publicationPropsSchema)(row),
+    );
+    return validated.map((row) => new Publication(row));
   });

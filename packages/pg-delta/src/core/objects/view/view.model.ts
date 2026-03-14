@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import {
   BasePgModel,
   columnPropsSchema,
@@ -136,8 +132,11 @@ export class View extends BasePgModel implements TableLikeObject {
   }
 }
 
-export async function extractViews(pool: Queryable): Promise<View[]> {
-  const { rows: viewRows } = await pool.query<ViewProps>(sql`
+export const extractViews = (
+  db: DatabaseApi,
+): Effect.Effect<View[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: viewRows } = yield* db.query<ViewProps>(sql`
 with extension_oids as (
   select
     objid
@@ -264,26 +263,9 @@ group by
 order by
   v.schema, v.name
   `);
-  // Validate and parse each row using the schema
-  const validatedRows = viewRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(viewPropsSchema)(row),
-  );
-  return validatedRows.map((row: ViewProps) => new View(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractViewsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<View[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractViews(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractViews failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractViews",
-        cause: err,
-      }),
+    // Validate and parse each row using the schema
+    const validatedRows = viewRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(viewPropsSchema)(row),
+    );
+    return validatedRows.map((row: ViewProps) => new View(row));
   });

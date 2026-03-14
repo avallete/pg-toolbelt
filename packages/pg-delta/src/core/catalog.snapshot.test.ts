@@ -280,7 +280,7 @@ describe("catalog snapshot serde", () => {
   });
 
   test("createPlan accepts Catalog directly as source", async () => {
-    const { createPlan } = await import("./plan/create.ts");
+    const { createPlanPromise: createPlan } = await import("./plan/create.ts");
 
     const source = await createEmptyCatalog(160000, "postgres");
     const target = await createEmptyCatalog(160000, "postgres");
@@ -290,7 +290,7 @@ describe("catalog snapshot serde", () => {
   });
 
   test("createPlan with null source produces plan when target has objects", async () => {
-    const { createPlan } = await import("./plan/create.ts");
+    const { createPlanPromise: createPlan } = await import("./plan/create.ts");
 
     const publicSchema = new Schema({
       name: "public",
@@ -320,7 +320,7 @@ describe("catalog snapshot serde", () => {
   });
 
   test("createPlan with filter DSL without cascade keeps dependents of excluded changes", async () => {
-    const { createPlan } = await import("./plan/create.ts");
+    const { createPlanPromise: createPlan } = await import("./plan/create.ts");
 
     const authSchema = new Schema({
       name: "auth",

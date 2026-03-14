@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import { diffCatalogs } from "../../src/core/catalog.diff.ts";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
+import { wrapPool } from "../../src/core/services/database-live.ts";
 import { POSTGRES_VERSIONS } from "../constants.ts";
 import { withDb } from "../utils.ts";
 
@@ -17,8 +19,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           state varchar
         );
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
         // Expect the changes to be:
         expect(changes).toEqual(
@@ -58,8 +64,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           created_at timestamp default now()
         );
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -159,8 +169,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         create view test_schema.active_users as
           select id, username from test_schema.users where id > 0;
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -244,8 +258,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           maxvalue 999999
           cache 1;
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -280,8 +298,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         create schema test_schema;
         create type test_schema.user_status as enum ('active', 'inactive', 'pending');
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -317,8 +339,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         create domain test_schema.email_address as varchar(255)
           constraint email_check check (value ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$');
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -362,8 +388,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         end;
         $$;
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -408,8 +438,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           from test_schema.users
           group by date_trunc('day', created_at);
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -504,8 +538,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           for each row
           execute function test_schema.update_updated_at();
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -603,8 +641,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           for all
           using (tenant_id = current_setting('app.tenant_id')::integer);
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -715,8 +757,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         end;
         $$;
       `);
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -860,8 +906,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         -- Branch database is empty, all entities from main should be dropped
       `);
 
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual(
@@ -1013,8 +1063,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         $$;
       `);
 
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         // We expect 7 alter operations (1 for enum, 1 for domain, 1 for sequence, 2 for table columns, 1 for view, 1 for procedure)
@@ -1125,8 +1179,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         create type test_schema.status as enum ('active', 'inactive', 'pending');
       `);
 
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual([
@@ -1158,8 +1216,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           constraint age_check check (value >= 0 and value <= 150);
       `);
 
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual([
@@ -1203,8 +1265,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         );
       `);
 
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual([
@@ -1252,8 +1318,12 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           select id, username, role from test_schema.users;
       `);
 
-        const mainCatalog = await extractCatalog(db.main);
-        const branchCatalog = await extractCatalog(db.branch);
+        const mainCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.main)),
+        );
+        const branchCatalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
         const changes = diffCatalogs(mainCatalog, branchCatalog);
 
         expect(changes).toEqual([

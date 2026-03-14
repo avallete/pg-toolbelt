@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import { stableId } from "../utils.ts";
 
@@ -106,8 +102,11 @@ export class Rule extends BasePgModel {
   }
 }
 
-export async function extractRules(pool: Queryable): Promise<Rule[]> {
-  const { rows: ruleRows } = await pool.query<RuleProps>(sql`
+export const extractRules = (
+  db: DatabaseApi,
+): Effect.Effect<Rule[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: ruleRows } = yield* db.query<RuleProps>(sql`
       WITH extension_rule_oids AS (
         SELECT
           objid
@@ -174,26 +173,9 @@ export async function extractRules(pool: Queryable): Promise<Rule[]> {
         1, 3, 2
   `);
 
-  const validatedRows = ruleRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(rulePropsSchema)(row),
-  );
+    const validatedRows = ruleRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(rulePropsSchema)(row),
+    );
 
-  return validatedRows.map((row) => new Rule(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractRulesEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Rule[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractRules(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractRules failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractRules",
-        cause: err,
-      }),
+    return validatedRows.map((row) => new Rule(row));
   });

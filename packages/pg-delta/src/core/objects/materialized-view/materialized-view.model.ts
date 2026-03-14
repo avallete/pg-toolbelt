@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import {
   BasePgModel,
   columnPropsSchema,
@@ -145,10 +141,11 @@ export class MaterializedView extends BasePgModel implements TableLikeObject {
   }
 }
 
-export async function extractMaterializedViews(
-  pool: Queryable,
-): Promise<MaterializedView[]> {
-  const { rows: mvRows } = await pool.query<MaterializedViewProps>(sql`
+export const extractMaterializedViews = (
+  db: DatabaseApi,
+): Effect.Effect<MaterializedView[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: mvRows } = yield* db.query<MaterializedViewProps>(sql`
 with extension_oids as (
   select
     objid
@@ -252,29 +249,12 @@ group by
   c.oid, c.relnamespace, c.relname, pg_get_viewdef(c.oid), c.relrowsecurity, c.relforcerowsecurity, c.relhasindex, c.relhasrules, c.relhastriggers, c.relhassubclass, c.relispopulated, c.relreplident, c.relispartition, c.reloptions, pg_get_expr(c.relpartbound, c.oid), c.relowner
 order by
   c.relnamespace::regnamespace, c.relname
-  `);
-  // Validate and parse each row using the schema
-  const validatedRows = mvRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(materializedViewPropsSchema)(row),
-  );
-  return validatedRows.map(
-    (row: MaterializedViewProps) => new MaterializedView(row),
-  );
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractMaterializedViewsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<MaterializedView[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractMaterializedViews(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractMaterializedViews failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractMaterializedViews",
-        cause: err,
-      }),
+    `);
+    // Validate and parse each row using the schema
+    const validatedRows = mvRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(materializedViewPropsSchema)(row),
+    );
+    return validatedRows.map(
+      (row: MaterializedViewProps) => new MaterializedView(row),
+    );
   });

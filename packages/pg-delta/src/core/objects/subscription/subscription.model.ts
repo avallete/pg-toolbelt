@@ -1,11 +1,7 @@
 import { Effect, Schema } from "effect";
 import { extractVersion } from "../../context.ts";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 
 const subscriptionPropsSchema = Schema.Struct({
@@ -112,26 +108,27 @@ export class Subscription extends BasePgModel {
   }
 }
 
-export async function extractSubscriptions(
-  pool: Queryable,
-): Promise<Subscription[]> {
-  const version = await extractVersion(pool);
-  const isPostgres16OrGreater = version >= 160000;
-  const isPostgres17OrGreater = version >= 170000;
-  const isPostgres17_2OrGreater = version >= 170002; // failover added in 17.2 (170002)
-  const isPostgres17_3OrGreater = version >= 170003; // origin column added in 17.3
+export const extractSubscriptions = (
+  db: DatabaseApi,
+): Effect.Effect<Subscription[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const version = yield* extractVersion(db);
+    const isPostgres16OrGreater = version >= 160000;
+    const isPostgres17OrGreater = version >= 170000;
+    const isPostgres17_2OrGreater = version >= 170002; // failover added in 17.2 (170002)
+    const isPostgres17_3OrGreater = version >= 170003; // origin column added in 17.3
 
-  // Build the query dynamically based on PostgreSQL version
-  const passwordRequiredExpr = isPostgres16OrGreater
-    ? "s.subpasswordrequired"
-    : "true";
-  const runAsOwnerExpr = isPostgres17OrGreater ? "s.subrunasowner" : "false";
-  const failoverExpr = isPostgres17_2OrGreater ? "s.subfailover" : "false";
-  const originExpr = isPostgres17_3OrGreater
-    ? "case s.suborigin when 'none' then 'none' else 'any' end"
-    : "'any'";
+    // Build the query dynamically based on PostgreSQL version
+    const passwordRequiredExpr = isPostgres16OrGreater
+      ? "s.subpasswordrequired"
+      : "true";
+    const runAsOwnerExpr = isPostgres17OrGreater ? "s.subrunasowner" : "false";
+    const failoverExpr = isPostgres17_2OrGreater ? "s.subfailover" : "false";
+    const originExpr = isPostgres17_3OrGreater
+      ? "case s.suborigin when 'none' then 'none' else 'any' end"
+      : "'any'";
 
-  const queryText = `
+    const queryText = `
       with extension_oids as (
         select objid
         from pg_depend d
@@ -185,29 +182,12 @@ export async function extractSubscriptions(
       left join extension_oids e on e.objid = s.oid
       where e.objid is null
       order by s.subname
-  `;
+    `;
 
-  const { rows } = await pool.query<SubscriptionProps>(queryText);
+    const { rows } = yield* db.query<SubscriptionProps>(queryText);
 
-  const validated = rows.map((row) =>
-    Schema.decodeUnknownSync(subscriptionPropsSchema)(row),
-  );
-  return validated.map((row) => new Subscription(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractSubscriptionsEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Subscription[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractSubscriptions(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractSubscriptions failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractSubscriptions",
-        cause: err,
-      }),
+    const validated = rows.map((row) =>
+      Schema.decodeUnknownSync(subscriptionPropsSchema)(row),
+    );
+    return validated.map((row) => new Subscription(row));
   });

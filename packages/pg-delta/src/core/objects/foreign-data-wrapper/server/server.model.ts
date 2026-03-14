@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../../services/database.ts";
+import type { CatalogExtractionError } from "../../../errors.ts";
+import type { DatabaseApi } from "../../../services/database.ts";
 import { BasePgModel } from "../../base.model.ts";
 import {
   type PrivilegeProps,
@@ -84,8 +80,11 @@ export class Server extends BasePgModel {
   }
 }
 
-export async function extractServers(pool: Queryable): Promise<Server[]> {
-  const { rows: serverRows } = await pool.query<ServerProps>(sql`
+export const extractServers = (
+  db: DatabaseApi,
+): Effect.Effect<Server[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: serverRows } = yield* db.query<ServerProps>(sql`
       select
         quote_ident(srv.srvname) as name,
         srv.srvowner::regrole::text as owner,
@@ -116,40 +115,23 @@ export async function extractServers(pool: Queryable): Promise<Server[]> {
         srv.srvname
   `);
 
-  // Validate and parse each row using the schema
-  const validatedRows = serverRows.map((row: unknown) => {
-    const parsed = Schema.decodeUnknownSync(serverPropsSchema)(row);
-    // Parse options from PostgreSQL format ['key=value'] to ['key', 'value']
-    let options = parsed.options;
-    if (options && options.length > 0) {
-      const parsedOptions: string[] = [];
-      for (const opt of options) {
-        const eqIndex = opt.indexOf("=");
-        if (eqIndex > 0) {
-          parsedOptions.push(opt.substring(0, eqIndex));
-          parsedOptions.push(opt.substring(eqIndex + 1));
+    // Validate and parse each row using the schema
+    const validatedRows = serverRows.map((row: unknown) => {
+      const parsed = Schema.decodeUnknownSync(serverPropsSchema)(row);
+      // Parse options from PostgreSQL format ['key=value'] to ['key', 'value']
+      let options = parsed.options;
+      if (options && options.length > 0) {
+        const parsedOptions: string[] = [];
+        for (const opt of options) {
+          const eqIndex = opt.indexOf("=");
+          if (eqIndex > 0) {
+            parsedOptions.push(opt.substring(0, eqIndex));
+            parsedOptions.push(opt.substring(eqIndex + 1));
+          }
         }
+        options = parsedOptions.length > 0 ? parsedOptions : null;
       }
-      options = parsedOptions.length > 0 ? parsedOptions : null;
-    }
-    return { ...parsed, options };
-  });
-  return validatedRows.map((row: ServerProps) => new Server(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractServersEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Server[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractServers(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractServers failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractServers",
-        cause: err,
-      }),
+      return { ...parsed, options };
+    });
+    return validatedRows.map((row: ServerProps) => new Server(row));
   });

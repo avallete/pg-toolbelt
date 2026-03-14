@@ -1,11 +1,7 @@
 import { sql } from "@ts-safeql/sql-tag";
 import { Effect, Schema } from "effect";
-import { CatalogExtractionError } from "../../errors.ts";
-import {
-  asQueryable,
-  type DatabaseApi,
-  type Queryable,
-} from "../../services/database.ts";
+import type { CatalogExtractionError } from "../../errors.ts";
+import type { DatabaseApi } from "../../services/database.ts";
 import { BasePgModel } from "../base.model.ts";
 import {
   type PrivilegeProps,
@@ -236,8 +232,11 @@ export class Aggregate extends BasePgModel {
   }
 }
 
-export async function extractAggregates(pool: Queryable): Promise<Aggregate[]> {
-  const { rows: aggregateRows } = await pool.query<AggregateProps>(sql`
+export const extractAggregates = (
+  db: DatabaseApi,
+): Effect.Effect<Aggregate[], CatalogExtractionError> =>
+  Effect.gen(function* () {
+    const { rows: aggregateRows } = yield* db.query<AggregateProps>(sql`
 with extension_oids as (
   select
     objid
@@ -318,25 +317,8 @@ order by
   1, 2, 3
   `);
 
-  const validatedRows = aggregateRows.map((row: unknown) =>
-    Schema.decodeUnknownSync(aggregatePropsSchema)(row),
-  );
-  return validatedRows.map((row: AggregateProps) => new Aggregate(row));
-}
-
-// ============================================================================
-// Effect-native version
-// ============================================================================
-
-export const extractAggregatesEffect = (
-  db: DatabaseApi,
-): Effect.Effect<Aggregate[], CatalogExtractionError> =>
-  Effect.tryPromise({
-    try: () => extractAggregates(asQueryable(db)),
-    catch: (err) =>
-      new CatalogExtractionError({
-        message: `extractAggregates failed: ${err instanceof Error ? err.message : err}`,
-        extractor: "extractAggregates",
-        cause: err,
-      }),
+    const validatedRows = aggregateRows.map((row: unknown) =>
+      Schema.decodeUnknownSync(aggregatePropsSchema)(row),
+    );
+    return validatedRows.map((row: AggregateProps) => new Aggregate(row));
   });

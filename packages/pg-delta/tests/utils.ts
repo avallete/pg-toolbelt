@@ -1,5 +1,7 @@
 import type { Pool } from "pg";
 import { createPool } from "../src/core/postgres-config.ts";
+import type { DatabaseApi } from "../src/core/services/database.ts";
+import { wrapPool } from "../src/core/services/database-live.ts";
 import {
   POSTGRES_VERSION_TO_SUPABASE_POSTGRES_TAG,
   type PostgresVersion,
@@ -20,6 +22,8 @@ function suppressShutdownError(err: Error & { code?: string }) {
 export type DbFixture = {
   main: Pool;
   branch: Pool;
+  mainDb: DatabaseApi;
+  branchDb: DatabaseApi;
   mainUrl: string;
   branchUrl: string;
 };
@@ -39,7 +43,14 @@ export function withDb(
     const { main, branch, mainUrl, branchUrl, cleanup } =
       await containerManager.getDatabasePair(postgresVersion);
     try {
-      await fn({ main, branch, mainUrl, branchUrl });
+      await fn({
+        main,
+        branch,
+        mainDb: wrapPool(main),
+        branchDb: wrapPool(branch),
+        mainUrl,
+        branchUrl,
+      });
     } finally {
       await cleanup();
     }
@@ -61,7 +72,14 @@ export function withDbIsolated(
     const { main, branch, mainUrl, branchUrl, cleanup } =
       await containerManager.getIsolatedContainers(postgresVersion);
     try {
-      await fn({ main, branch, mainUrl, branchUrl });
+      await fn({
+        main,
+        branch,
+        mainDb: wrapPool(main),
+        branchDb: wrapPool(branch),
+        mainUrl,
+        branchUrl,
+      });
     } finally {
       await cleanup();
     }
@@ -95,6 +113,8 @@ export function withDbSupabaseIsolated(
       await fn({
         main,
         branch,
+        mainDb: wrapPool(main),
+        branchDb: wrapPool(branch),
         mainUrl: containerMain.getConnectionUri(),
         branchUrl: containerBranch.getConnectionUri(),
       });

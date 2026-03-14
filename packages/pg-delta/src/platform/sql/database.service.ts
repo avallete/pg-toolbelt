@@ -92,31 +92,6 @@ export const fromPgClient = (
   };
 };
 
-/**
- * Promise-oriented extractors still accept a queryable shape. This adapter keeps
- * them usable without forcing the pure extractor implementations to know about
- * Effect.
- */
-export interface Queryable {
-  readonly query: <R = Record<string, unknown>>(
-    query: QueryInput,
-    values?: readonly unknown[],
-  ) => Promise<QueryResult<R>>;
-}
-
-export const asQueryable = (db: DatabaseApi): Queryable => ({
-  query: <R = Record<string, unknown>>(
-    query: QueryInput,
-    values?: readonly unknown[],
-  ) =>
-    db
-      .query<R>(
-        typeof query === "string" ? query : query.text,
-        values ?? (typeof query === "string" ? undefined : query.values),
-      )
-      .pipe(Effect.runPromise),
-});
-
 function normalizeRawResult<R>(raw: unknown): QueryResult<R> {
   if (Array.isArray(raw)) {
     const last = raw[raw.length - 1] as

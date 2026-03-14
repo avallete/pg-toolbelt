@@ -41,14 +41,15 @@ export const handleDeclarativeApply = Effect.fnUntraced(function* (
 
   yield* output.info(`Analyzing SQL files in ${args.path}...`);
 
-  const content = yield* Effect.tryPromise({
-    try: () => loadDeclarativeSchema(args.path),
-    catch: (error) =>
-      new CliExitError({
-        exitCode: 1,
-        message: `Error: ${error instanceof Error ? error.message : String(error)}`,
-      }),
-  });
+  const content = yield* loadDeclarativeSchema(args.path).pipe(
+    Effect.mapError(
+      (error) =>
+        new CliExitError({
+          exitCode: 1,
+          message: `Error: ${error.message}`,
+        }),
+    ),
+  );
 
   if (content.length === 0) {
     return yield* Effect.fail(

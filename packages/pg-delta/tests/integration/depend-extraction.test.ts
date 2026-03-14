@@ -6,7 +6,9 @@
 
 import { describe, expect, test } from "bun:test";
 import dedent from "dedent";
+import { Effect } from "effect";
 import { extractCatalog } from "../../src/core/catalog.model.ts";
+import { wrapPool } from "../../src/core/services/database-live.ts";
 import { POSTGRES_VERSIONS } from "../constants.ts";
 import { withDbIsolated } from "../utils.ts";
 
@@ -33,7 +35,9 @@ for (const pgVersion of POSTGRES_VERSIONS) {
           `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA dep_schema GRANT SELECT ON TABLES TO dep_role_a`,
         );
 
-        const catalog = await extractCatalog(db.branch);
+        const catalog = await Effect.runPromise(
+          extractCatalog(wrapPool(db.branch)),
+        );
 
         expect(catalog.depends).toBeDefined();
         expect(Array.isArray(catalog.depends)).toBe(true);
@@ -83,8 +87,8 @@ for (const pgVersion of POSTGRES_VERSIONS) {
         `);
 
         const [mainCatalog, branchCatalog] = await Promise.all([
-          extractCatalog(db.main),
-          extractCatalog(db.branch),
+          Effect.runPromise(extractCatalog(wrapPool(db.main))),
+          Effect.runPromise(extractCatalog(wrapPool(db.branch))),
         ]);
 
         expect(mainCatalog.depends.length).toBeGreaterThan(0);
