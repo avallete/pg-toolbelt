@@ -95,44 +95,39 @@ const readSqlFilesInDirectoryEffect = (
     }
   });
 
-export const discoverSqlFilesEffect = (
+export const discoverSqlFilesEffect = Effect.fnUntraced(function* (
   roots: string[],
-): Effect.Effect<
-  DiscoveryResult,
-  never,
-  FileSystem.FileSystem | WorkingDirectory
-> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const workingDirectory = yield* WorkingDirectory;
-    const files = new Set<string>();
-    const missingRoots: string[] = [];
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const workingDirectory = yield* WorkingDirectory;
+  const files = new Set<string>();
+  const missingRoots: string[] = [];
 
-    for (const inputRoot of roots) {
-      const resolvedRoot = resolveFromWorkingDirectory(
-        workingDirectory.cwd,
-        inputRoot,
-      );
-      const exists = yield* fs
-        .exists(resolvedRoot)
-        .pipe(Effect.orElseSucceed(() => false));
-      if (!exists) {
-        missingRoots.push(inputRoot);
-        continue;
-      }
-
-      const info = yield* fs
-        .stat(resolvedRoot)
-        .pipe(Effect.orElseSucceed(() => ({ type: "File" as const })));
-      if (info.type === "File" && resolvedRoot.toLowerCase().endsWith(".sql")) {
-        files.add(resolvedRoot);
-      } else if (info.type === "Directory") {
-        yield* readSqlFilesInDirectoryEffect(resolvedRoot, files);
-      }
+  for (const inputRoot of roots) {
+    const resolvedRoot = resolveFromWorkingDirectory(
+      workingDirectory.cwd,
+      inputRoot,
+    );
+    const exists = yield* fs
+      .exists(resolvedRoot)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!exists) {
+      missingRoots.push(inputRoot);
+      continue;
     }
 
-    return {
-      files: [...files].sort((a, b) => a.localeCompare(b)),
-      missingRoots,
-    };
-  });
+    const info = yield* fs
+      .stat(resolvedRoot)
+      .pipe(Effect.orElseSucceed(() => ({ type: "File" as const })));
+    if (info.type === "File" && resolvedRoot.toLowerCase().endsWith(".sql")) {
+      files.add(resolvedRoot);
+    } else if (info.type === "Directory") {
+      yield* readSqlFilesInDirectoryEffect(resolvedRoot, files);
+    }
+  }
+
+  return {
+    files: [...files].sort((a, b) => a.localeCompare(b)),
+    missingRoots,
+  };
+});

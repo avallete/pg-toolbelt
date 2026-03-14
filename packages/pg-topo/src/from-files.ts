@@ -2,14 +2,12 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { Effect, FileSystem } from "effect";
 import { analyzeAndSort, analyzeAndSortEffect } from "./analyze-and-sort.ts";
-import type { ParseError } from "./errors.ts";
 import { discoverSqlFiles, discoverSqlFilesEffect } from "./ingest/discover.ts";
 import type {
   AnalyzeOptions,
   AnalyzeResult,
   Diagnostic,
 } from "./model/types.ts";
-import type { ParserService } from "./services/parser.ts";
 import { WorkingDirectory } from "./services/working-directory.ts";
 
 const resolveRoots = (roots: string[], cwd: string): string[] =>
@@ -254,57 +252,52 @@ const remapResult = (
   };
 };
 
-export const analyzeAndSortFromFilesEffect = (
+export const analyzeAndSortFromFilesEffect = Effect.fnUntraced(function* (
   roots: string[],
   options?: AnalyzeOptions,
-): Effect.Effect<
-  AnalyzeResult,
-  ParseError,
-  ParserService | FileSystem.FileSystem | WorkingDirectory
-> =>
-  Effect.gen(function* () {
-    if (roots.length === 0) {
-      return {
-        ordered: [],
-        diagnostics: [
-          {
-            code: "DISCOVERY_ERROR" as const,
-            message:
-              "No roots provided. Pass at least one SQL file or directory root.",
-          },
-        ],
-        graph: {
-          nodeCount: 0,
-          edges: [],
-          cycleGroups: [],
+) {
+  if (roots.length === 0) {
+    return {
+      ordered: [],
+      diagnostics: [
+        {
+          code: "DISCOVERY_ERROR" as const,
+          message:
+            "No roots provided. Pass at least one SQL file or directory root.",
         },
-      };
-    }
+      ],
+      graph: {
+        nodeCount: 0,
+        edges: [],
+        cycleGroups: [],
+      },
+    };
+  }
 
-    const fs = yield* FileSystem.FileSystem;
-    const discovery = yield* discoverSqlFilesEffect(roots);
-    const discoveryDiagnostics: Diagnostic[] = [];
+  const fs = yield* FileSystem.FileSystem;
+  const discovery = yield* discoverSqlFilesEffect(roots);
+  const discoveryDiagnostics: Diagnostic[] = [];
 
-    for (const missingRoot of discovery.missingRoots) {
-      discoveryDiagnostics.push({
-        code: "DISCOVERY_ERROR",
-        message: `Root does not exist: '${missingRoot}'.`,
-      });
-    }
+  for (const missingRoot of discovery.missingRoots) {
+    discoveryDiagnostics.push({
+      code: "DISCOVERY_ERROR",
+      message: `Root does not exist: '${missingRoot}'.`,
+    });
+  }
 
-    const workingDirectory = yield* WorkingDirectory;
-    const resolvedRoots = resolveRoots(roots, workingDirectory.cwd);
-    const basePath = yield* computeCommonBaseEffect(resolvedRoots);
+  const workingDirectory = yield* WorkingDirectory;
+  const resolvedRoots = resolveRoots(roots, workingDirectory.cwd);
+  const basePath = yield* computeCommonBaseEffect(resolvedRoots);
 
-    const sqlContents: string[] = [];
-    for (const filePath of discovery.files) {
-      const content = yield* fs
-        .readFileString(filePath, "utf-8")
-        .pipe(Effect.orDie);
-      sqlContents.push(content);
-    }
+  const sqlContents: string[] = [];
+  for (const filePath of discovery.files) {
+    const content = yield* fs
+      .readFileString(filePath, "utf-8")
+      .pipe(Effect.orDie);
+    sqlContents.push(content);
+  }
 
-    const result = yield* analyzeAndSortEffect(sqlContents, options);
+  const result = yield* analyzeAndSortEffect(sqlContents, options);
 
-    return remapResult(result, discovery.files, basePath, discoveryDiagnostics);
-  });
+  return remapResult(result, discovery.files, basePath, discoveryDiagnostics);
+});

@@ -57,20 +57,19 @@ export const validateSqlSyntax = async (sql: string): Promise<void> => {
  * Validate SQL syntax using the ParserService. The WASM module loading
  * is handled by the service layer.
  */
-export const validateSqlSyntaxEffect = (
+export const validateSqlSyntaxEffect = Effect.fnUntraced(function* (
   sql: string,
-): Effect.Effect<void, ValidationError, ParserService> =>
-  Effect.gen(function* () {
-    const parser = yield* ParserService;
-    const parsed = yield* parser
-      .parseSqlContent(sql, "<validation>")
-      .pipe(
-        Effect.mapError(
-          (e) => new ValidationError({ message: e.message, cause: e }),
-        ),
-      );
-    const validationError = toValidationError(sql, parsed);
-    if (validationError) {
-      return yield* Effect.fail(validationError);
-    }
-  });
+) {
+  const parser = yield* ParserService;
+  const parsed = yield* parser
+    .parseSqlContent(sql, "<validation>")
+    .pipe(
+      Effect.mapError(
+        (e) => new ValidationError({ message: e.message, cause: e }),
+      ),
+    );
+  const validationError = toValidationError(sql, parsed);
+  if (validationError) {
+    return yield* Effect.fail(validationError);
+  }
+});

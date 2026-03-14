@@ -1,4 +1,4 @@
-import { Option } from "effect";
+import { Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { handleCatalogExport } from "./catalog-export.handler.ts";
 
@@ -27,5 +27,5 @@ export const catalogExportCommand = Command.make(
       target: args.target,
       output: args.output,
       role: Option.getOrUndefined(args.role),
-    }),
+    }).pipe(Effect.scoped),
 );

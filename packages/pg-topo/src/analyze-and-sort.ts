@@ -4,7 +4,6 @@ import {
   phaseForStatementClass,
   statementClassAstNode,
 } from "./classify/classify-statement.ts";
-import type { ParseError } from "./errors.ts";
 import { extractDependencies } from "./extract/extract-dependencies.ts";
 import { buildGraph, type EdgeMetadata } from "./graph/build-graph.ts";
 import { compareStatementIndices, topoSort } from "./graph/topo-sort.ts";
@@ -363,32 +362,31 @@ const runSyncPipeline = (
   };
 };
 
-export const analyzeAndSortEffect = (
+export const analyzeAndSortEffect = Effect.fnUntraced(function* (
   sql: string[],
   options?: AnalyzeOptions,
-): Effect.Effect<AnalyzeResult, ParseError, ParserService> =>
-  Effect.gen(function* () {
-    if (sql.length === 0) {
-      return {
-        ...EMPTY_RESULT,
-        diagnostics: [
-          {
-            code: "DISCOVERY_ERROR" as const,
-            message: "No SQL input provided.",
-          },
-        ],
-      };
-    }
+) {
+  if (sql.length === 0) {
+    return {
+      ...EMPTY_RESULT,
+      diagnostics: [
+        {
+          code: "DISCOVERY_ERROR" as const,
+          message: "No SQL input provided.",
+        },
+      ],
+    };
+  }
 
-    const parser = yield* ParserService;
-    const diagnostics: Diagnostic[] = [];
-    const parsedStatements: ParsedStatement[] = [];
+  const parser = yield* ParserService;
+  const diagnostics: Diagnostic[] = [];
+  const parsedStatements: ParsedStatement[] = [];
 
-    for (let i = 0; i < sql.length; i += 1) {
-      const parsed = yield* parser.parseSqlContent(sql[i], `<input:${i}>`);
-      parsedStatements.push(...parsed.statements);
-      diagnostics.push(...parsed.diagnostics);
-    }
+  for (let i = 0; i < sql.length; i += 1) {
+    const parsed = yield* parser.parseSqlContent(sql[i], `<input:${i}>`);
+    parsedStatements.push(...parsed.statements);
+    diagnostics.push(...parsed.diagnostics);
+  }
 
-    return runSyncPipeline(parsedStatements, diagnostics, options);
-  });
+  return runSyncPipeline(parsedStatements, diagnostics, options);
+});
