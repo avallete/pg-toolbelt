@@ -180,3 +180,41 @@ expect(result.sql).toMatchInlineSnapshot(`
 ```
 
 Run tests once to auto-generate the snapshot values — Bun will fill them in automatically on first run. Update snapshots intentionally with `bun run test -u -- <test-name>`.
+
+## Cursor Cloud specific instructions
+
+### Environment prerequisites
+
+Bun and Docker must be installed on the VM. The update script handles `bun install`; Docker and Bun are pre-installed in the VM snapshot.
+
+### Starting Docker
+
+The Docker daemon must be running before integration tests. Start it with:
+
+```bash
+sudo dockerd &>/tmp/dockerd.log &
+sleep 3
+sudo chmod 666 /var/run/docker.sock
+```
+
+The Cloud Agent VM runs Docker-in-Docker with `fuse-overlayfs` storage driver and `iptables-legacy`. These are pre-configured in the snapshot.
+
+### Running services
+
+This is a library monorepo — there are no long-running application servers. The "hello world" equivalent is running tests:
+
+- **Lint**: `bun run format-and-lint` (Biome)
+- **Type check**: `bun run check-types`
+- **Build**: `bun run build`
+- **pg-delta unit tests**: `cd packages/pg-delta && bun test src/` (no Docker)
+- **pg-delta integration tests**: `cd packages/pg-delta && PGDELTA_TEST_POSTGRES_VERSIONS=17 bun test tests/integration/<file>.test.ts` (Docker required, one file at a time)
+- **pg-topo tests**: `cd packages/pg-topo && bun test` (Docker required)
+
+See the Quick Reference section above for the full command list.
+
+### Gotchas
+
+- The `cpu-features` native module is stubbed via `overrides` in root `package.json` — do not remove that stub or `bun install` will fail on native compilation.
+- pg-delta unit tests (867 tests across 144 files) take ~75s; run specific files during iteration.
+- Integration tests pull Docker images on first run (`postgres:17.6-alpine`, etc.) — the first run is slower; subsequent runs reuse cached images.
+- `AGENTS.md`, `CLAUDE.md`, and `.github/agents/pg-toolbelt.md` are symlinked — only edit `.github/agents/pg-toolbelt.md` (the real file).
