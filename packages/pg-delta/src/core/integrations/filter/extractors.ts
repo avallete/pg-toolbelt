@@ -60,6 +60,18 @@ export const PROPERTY_EXTRACTORS: Record<string, PropertyExtractor> = {
     }
     return null;
   },
+  provider: (change: Change) => {
+    const scoped = change as { scope: string };
+    if (
+      scoped.scope === "security_label" &&
+      "securityLabel" in change &&
+      change.securityLabel != null
+    ) {
+      return (change as { securityLabel: { provider: string } }).securityLabel
+        .provider;
+    }
+    return null;
+  },
 };
 
 export function getSchema(change: Change) {
